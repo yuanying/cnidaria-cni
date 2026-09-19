@@ -1,0 +1,144 @@
+# ADR 0003: nftables のテーブルは `inet cnidaria` の 1 つにし、チェインの走る順序を決める
+
+- 状態: 決定（2026-09-19）
+
+## 背景
+
+ノードには既に kube-proxy が書いた大量の iptables-nft 状態がある。`ip nat` と `ip filter`
+のテーブル（とその `ip6` の対）に、標準の優先度で `PREROUTING`、`INPUT`、`FORWARD`、
+`OUTPUT`、`POSTROUTING` の base chain が掛かっている。cnidaria はそのどれも乱さずに、
+Pod 向けの NetworkPolicy の enforce、ノード自身のポリシー（ADR 0004）、そして flannel が
+持っていた masquerade ルール（ADR 0001）を足さなければならない。
+
+regied の
+[ADR 0013](https://github.com/yuanying/regied/blob/main/docs/adr/0013-nftables-ruleset-shape.md)
+が出発点の形である。`inet` テーブル 1 つ、`nft -f` による不可分な置換、ルールセットは
+決して flush しない、オペレーターが書いた名前で物に名前を付ける。残りは netfilter に
+ついての 2 つの事実が決める。
+
+**ある base chain の verdict は、そのフックでの評価を終わらせない。** 同じフックの base
+chain は —— 1 つのテーブルにあっても複数にあっても —— 優先度順に次々と走る。`accept` は
+それが置かれたチェインを終わらせるだけで、パケットは次の base chain も通る。`drop` は
+最終である。よって kube-proxy の `FORWARD` がパケットを accept しても cnidaria のチェインが
+それを drop するのを止めないし、cnidaria の `accept` がパケットを kube-proxy のルールから
+免除することもない。効力を持つために先頭である必要は誰にも無く、他人のチェインに何かを
+挿入する必要も無い。
+
+**DNAT は `forward` が走る前の `prerouting` で起きる。** kube-proxy の Service 変換は
+優先度 `dstnat`（-100）にある。優先度 `filter`（0）の `forward` チェインがパケットを見る
+ときには、宛先は選ばれた Pod になっている。したがってポリシーは Pod のアドレスに対して
+評価され、これは NetworkPolicy の意味論が述べるとおりである。egress ルールはトラフィックが
+到達してよい Pod を名指しするのであって、その前にある Service ではない。source NAT
+（`srcnat`、100）は `forward` の後に走るので、ポリシーが見る送信元アドレスは、出て行く
+トラフィックについては元のもの、別のノードが転送してきたトラフィックについては
+masquerade されたノードのアドレスである。
+
+## 決定
+
+### テーブルは 1 つ、`inet cnidaria`、不可分に置き換える
+
+cnidaria が書くものはすべて `inet cnidaria` に置く。テーブルを足し、消し、再び宣言する
+ファイルを 1 つのトランザクションとして `nft -f` で適用するので、ホストが半分だけの
+ルールセットを持つことはなく、同じ状態の再適用は同じ操作である。他のテーブルは読まず、
+書かず、flush しない。kube-proxy のものには触れない。
+
+ルールセットは、デーモンが API サーバーから見たものとこのノードの identity だけの純粋な
+関数である。レンダリングはコマンドを実行せず、カーネルの状態を読まない。
+
+### base chain は 5 つ
+
+| チェイン | フック | 優先度 | 内容 |
+|---|---|---|---|
+| `egress` | forward | `filter`（0） | NetworkPolicy の egress。送信元 Pod をキーにする |
+| `ingress` | forward | `filter + 1` | NetworkPolicy の ingress。宛先 Pod をキーにする |
+| `input` | input | `filter`（0） | NodePolicy の ingress。その前に安全ルール（ADR 0004） |
+| `output` | output | `filter`（0） | NodePolicy の egress。その前に安全ルール（ADR 0004） |
+| `postrouting` | postrouting | `srcnat`（100） | Pod CIDR の外へ出る Pod トラフィックの masquerade |
+
+すべての base chain は `policy accept` である。拒否はディスパッチチェインの末尾の明示的な
+`drop` として書くので、空あるいは半分しかレンダリングされていないテーブルは open 側に
+しか倒れず、ノードを締め出すことは決してない。また「何が拒否されているか」は常に読めて
+数えられるルールである。
+
+egress と ingress を 1 つの base chain の下の 2 つの regular chain ではなく 2 つの base
+chain にするのは、上の第 1 の事実による。egress ポリシーを持つ Pod から同じノードの
+ingress ポリシーを持つ Pod へのパケットは、両方を満たさなければならない。1 つの base
+chain の中では、egress チェックを通す `accept` が ingress チェックの走る前に評価を終えて
+しまう。2 つの base chain であれば、それぞれのチェックが自分の verdict まで走り、パケットは
+どちらにも drop されなかった場合にだけ通る。
+
+### Pod ポリシーのチェイン
+
+`egress` と `ingress` のそれぞれにおけるパターン:
+
+1. `ct state established,related accept`。NetworkPolicy が決めるのは誰が接続を開いて
+   よいかであり、返事はそれに従う。
+2. Pod のアドレスがその方向の *isolated* set（ファミリごとに 1 つ）に入っているパケット
+   について、ディスパッチチェインへ jump する。ある方向について Pod が isolated である
+   とは、その `policyType` を持つ NetworkPolicy が少なくとも 1 つその Pod を選択している
+   ことである。選択されていない Pod はどの set にもマッチせず、まったく評価されない。
+   これが「すべて許可」の既定である。
+3. ディスパッチチェインでは、NetworkPolicy ごとに 1 つのルールが、Pod のアドレスがその
+   ポリシーの選択 Pod set に入っているときにそのポリシーの regular chain へ jump する。
+4. ポリシーチェインは `from` / `to` の各エントリとポートの組み合わせごとに 1 つのルールを
+   持ち、相手 Pod の set、namespace の Pod set、`ipBlock` の範囲（`except` は区間を除いた
+   set として）、ポートにマッチし、それぞれ `accept` で終わる。何にもマッチしなかった
+   ポリシーチェインは return する。
+5. ディスパッチチェインは `drop` で終わる。どのポリシーも accept しなかった isolated な
+   Pod は拒否される。
+
+「いずれかのポリシーが許可すれば許可」は、`accept` が base chain にとって最終であることと
+`return` が次のポリシーへ抜けることから自然に出る。
+
+Pod はファミリごとに 1 つの、名前付きアドレス set になるので、Pod の出入りは set の中身を
+変え、チェインの構造を変えない。ルールは `counter` と、出所の namespace と名前を持つ
+`comment` を付けて持つので、`nft list ruleset` はオペレーター自身の語彙で読める。名前は
+決定的に nftables の識別子へ変換され、変換できない名前はレンダリングエラーである。
+
+### ノードから自分の Pod へのトラフィックは Pod ポリシーの対象ではない
+
+kubelet の probe と `exec` セッションはノード上で発生し、ローカルの Pod へは `forward`
+ではなく `output` を通って到達する。NetworkPolicy の実装は慣例としてノードが自分の Pod へ
+到達することを許しており、ヘルスチェックがユーザーのポリシーに従属するクラスターとは、
+ポリシーのバグに見える理由で不健全になるクラスターである。`output` チェインが持つのは
+NodePolicy だけである。
+
+### masquerade
+
+`postrouting` は、送信元がこのノードの Pod CIDR にあり、宛先がクラスターの Pod CIDR
+（全ノードの `podCIDRs`。ファミリごとに set として保持）の外にあるトラフィックを、出て行く
+リンク上のノードのアドレスへ変換する。regied の ADR 0013 が論じるとおり、フラグ無しの素の
+`masquerade` である。Pod 間と Pod から Service へのトラフィックは、DNAT が既に Service の
+アドレスを Pod のアドレスに変えているため、宛先のチェックで除外される。kube-proxy 自身の
+`POSTROUTING` は自分がマークしたパケットを masquerade する。1 つの接続は 1 つの source NAT
+binding を持ち、それは先に評価されたチェインが設定し、どちらのチェインも同じノードの
+アドレスへ写すので、2 つのテーブルの間の順序は問題にならない。
+
+### 適用は netlink ライブラリではなく `nft -f` で
+
+Go の netlink バインディングではなくサブプロセスの経路を選ぶ。nft のテキストは設定対象の
+ネイティブな言語である。デーモンが書くものは `nft list table inet cnidaria` が表示する
+ものであり、オペレーターがそのまま貼り戻せるものである。カーネル無しでレンダリングでき、
+テストで文字列として diff でき、バグ報告で検査できる。バインディングは libnftnl への
+ビルド時依存か大きな pure-Go シリアライザを要し、その出力を読むにはどのみち `nft` が
+要る。このためにイメージは `nftables` パッケージを同梱する。
+
+変更のたびにテーブル全体を置き換える。Pod イベントのバーストが 1 回の適用になるよう、
+変更はデバウンスする。想定する規模（数百の Pod、数十のポリシー）ではファイルは数百行、
+適用はミリ秒である。それが成り立たなくなれば、この配置を変えずに set を差分更新できる。
+
+## 帰結
+
+- 両方の Pod チェインの先頭の `ct state established,related accept` により、NetworkPolicy の
+  変更が動作中の接続を切ることは決してない。これは広く使われているすべての実装の挙動と
+  一致し、ユーザーが期待するものである。同時に、新たに isolated になった Pod は既に
+  持っていた接続を保つことも意味する。
+- ノードポリシーと Pod ポリシーは共有チェインを通じて相互作用しない。`input` / `output`
+  はノード自身のソケットに届くものを、`forward` は Pod を統べ、1 つのパケットは 2 つの
+  グループのちょうど一方によって評価される。
+- masquerade ルールはクラスターの Pod CIDR を必要とするので、経路の reconciler
+  （ADR 0006）とルールセットのレンダラーは同じ Node オブジェクトを読む。ノードが参加する
+  と、経路と set のエントリは同じ reconcile で到着する。
+- 将来の `nftables` モードの kube-proxy は自分の `ip kube-proxy` テーブルを書く。この配置の
+  何も kube-proxy のテーブル名やチェイン名には依存せず、依存するのは DNAT がどこで起きるか
+  だけであり、それは同じである。
