@@ -1,0 +1,29 @@
+{
+  "cniVersion": "1.0.0",
+  "name": "cnidaria",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isDefaultGateway": true,
+      "hairpinMode": true,
+      "mtu": 1500,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [
+          [
+            {
+              "subnet": "192.0.2.0/24"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {
+        "portMappings": true
+      }
+    }
+  ]
+}
