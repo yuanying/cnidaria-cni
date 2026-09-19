@@ -63,6 +63,10 @@ candidates for removal, as regied's
 [ADR 0009](https://github.com/yuanying/regied/blob/main/docs/adr/0009-ownership-boundary.md)
 requires.
 
+A route removed behind the daemon's back — by an operator, or by an interface going
+down and taking its routes with it — is put back by the next reconcile. One runs on
+every Node event and, so that nothing waits on an event, on a timer as well.
+
 Routes are written through a netlink library rather than by running `ip`, because a
 route is a small fixed struct with nothing to render and nothing an operator would
 diff, unlike a ruleset (ADR 0003).
