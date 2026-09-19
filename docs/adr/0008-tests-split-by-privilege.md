@@ -30,6 +30,11 @@ The netns tests are behind the build tag `netns` so `go test ./...` never picks 
 up. `go vet` and the linter run with the tag as well so that the tagged files do not
 rot.
 
+The testbed of nodes and pods lives in `test/netns`. A tagged test that needs only one
+fresh namespace and `nft` — that the rendered table is accepted, that a reapply changes
+nothing, that another table survives an apply — sits next to the package it checks,
+under `internal/nftables`, and the make target runs the tag over the whole module.
+
 ### The netns suite fails loudly when it cannot run
 
 Asking for the suite is a statement that the tools are expected. The make target and
