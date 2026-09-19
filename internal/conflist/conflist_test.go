@@ -40,6 +40,22 @@ func TestRenderMatchesGolden(t *testing.T) {
 				PodCIDRs: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")},
 			},
 		},
+		{
+			// Migrating from flannel: host-local keeps its leases under the ipam name
+			// when there is one, so naming flannel's store shares the allocations
+			// with the pods that already exist (ADR 0009).
+			name: "ipam-store-name",
+			params: Params{
+				Name:     "cnidaria",
+				Bridge:   "cni0",
+				MTU:      1500,
+				IPAMName: "cbr0",
+				PodCIDRs: []netip.Prefix{
+					netip.MustParsePrefix("192.0.2.0/24"),
+					netip.MustParsePrefix("2001:db8:1::/64"),
+				},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
