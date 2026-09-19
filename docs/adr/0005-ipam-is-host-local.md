@@ -1,6 +1,8 @@
 # ADR 0005: Address allocation is host-local's, fed from `node.spec.podCIDRs`
 
 - Status: Accepted (2026-09-19)
+- Amended by: ADR 0009 (2026-09-19) — the store directory follows the ipam name when
+  one is set, so that a node migrating from another CNI can share its leases
 
 ## Context
 

@@ -15,3 +15,4 @@ under [docs/ja/adr](../ja/adr/README.md).
 | [0006](0006-next-hop-per-address-family.md) | Next hop per address family | InternalIP of the same family; a missing family is logged, not worked around; routes carry an ownership marker |
 | [0007](0007-controller-runtime-for-everything-the-daemon-watches.md) | controller-runtime for everything the daemon watches | One manager, two reconcilers, controller-gen for the CRD, no kubebuilder scaffold |
 | [0008](0008-tests-split-by-privilege.md) | Tests split by privilege | Unit tests need the toolchain only; netns tests behind a build tag, run in a privileged container |
+| [0009](0009-migration-from-flannel-without-restarting-pods.md) | Migration from flannel without restarting pods | Same `cni0`, routes replaced by destination, ipam store shared by name (`--ipam-store-name`), flannel's plugin kept until its pods are gone, no file of others deleted |

@@ -61,7 +61,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 |---|---|
 | `cmd/cnidaria` | ノード常駐デーモンの入口。フラグ、Manager の組み立て、シグナル処理 |
 | `internal/apis/v1alpha1` | `NodePolicy` CRD の Go 型。controller-gen が DeepCopy と CRD manifest を生成する |
-| `internal/conflist` | このノード用の CNI conflist を描画する（純粋関数、golden テスト） |
+| `internal/conflist` | このノード用の CNI conflist を描画し（純粋関数、golden テスト）、ノードに原子的に書き出す |
 | `internal/routes` | 他ノードの PodCIDR への host-gw 経路を family ごとに保つ |
 | `internal/netpol` | NetworkPolicy v1 の意味論を chain / set のモデルに変換する |
 | `internal/nodepol` | NodePolicy と、消せない安全ルールを chain のモデルに変換する |
@@ -69,6 +69,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `internal/controller` | controller-runtime の reconciler。経路用と ruleset 用の 2 つ |
 | `internal/sysctl` | 起動時の kernel 設定検査（`br_netfilter`、forwarding） |
 | `test/netns` | build tag `netns` の統合テスト。netns で「ノード」を組んで外から検証する |
+| `test/netns/testbed` | netns テストの共有基盤。セグメント・ノード・Pod の netns を組み、リファレンスプラグインで Pod を bridge に繋ぐ |
 | `hack/netns` | netns テストを回す特権コンテナのイメージと起動スクリプト |
 | `deploy` | kustomize（DaemonSet、RBAC、`crd/` に生成された CRD） |
 | `docs/adr`, `docs/ja/adr` | 設計判断の記録（英語が正、日本語を併置） |
