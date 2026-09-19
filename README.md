@@ -23,8 +23,8 @@ it.
 - Renders NetworkPolicy v1 — podSelector, namespaceSelector, ipBlock, ports, endPort,
   policyTypes, "selected means isolated" — into one nftables table, `inet cnidaria`.
 - Accepts a cluster-scoped `NodePolicy` for the node's own `input` and `output`, with
-  safe rules a policy cannot remove and a rollback if the API server becomes
-  unreachable after an apply.
+  safe rules a policy cannot remove. A policy is permissive by default: what it would
+  drop is logged and counted until `Enforce` is chosen.
 - Source-NATs pod traffic that leaves the cluster network.
 
 ## What it does not do

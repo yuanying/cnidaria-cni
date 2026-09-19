@@ -1,6 +1,7 @@
-# ADR 0004: NodePolicy is a cluster-scoped CRD with rules that cannot lock a node out
+# ADR 0004: NodePolicy is a cluster-scoped CRD that is permissive by default and carries rules that cannot lock a node out
 
-- Status: Accepted (2026-09-19)
+- Status: Accepted (2026-09-19). Revised the same day: permissive mode replaces the
+  commit-confirmed apply that the first version of this record chose.
 
 ## Context
 
@@ -15,7 +16,7 @@ console. The first apply of a rule that drops by default happens on a live clust
 every selected node at once.
 
 Three things have to be decided: the shape of the object, which rules a policy cannot
-remove, and what happens when an apply turns out to be wrong.
+remove, and how an operator finds out what a policy would break before it breaks it.
 
 ## Decision
 
@@ -28,19 +29,22 @@ binary is renamed.
 
 | Field | Meaning |
 |---|---|
+| `spec.mode` | `Permissive` (the default) or `Enforce`. In `Permissive` the policy is rendered in full but nothing is dropped: what would have been dropped is logged and counted instead. As with SELinux, enforcing is chosen explicitly |
 | `spec.nodeSelector` | A label selector over Nodes. Empty selects every node |
 | `spec.policyTypes` | `Ingress`, `Egress` or both, with the same default rule as NetworkPolicy: `Ingress` always, `Egress` when egress rules are present |
 | `spec.ingress[]` | Each entry: `from[]` peers and `ports[]`. A node selected by a policy with type `Ingress` accepts on `input` only what an entry allows |
 | `spec.egress[]` | Each entry: `to[]` peers and `ports[]`. Same, on `output` |
 | peer | `ipBlock` with `cidr` and `except`. Pod and namespace selectors are not peers here: a node is addressed by the network, not by the cluster |
 | port | `protocol`, `port`, `endPort`, as in NetworkPolicy |
-| `status.nodes[]` | Per selected node: `observedGeneration` and whether that generation is `Applied`, `RolledBack` (with a message), or `Pending` |
+| `status.nodes[]` | Per selected node: `observedGeneration`, the `mode` that generation was applied in, and a `message` when it could not be rendered |
 
 The vocabulary is NetworkPolicy's on purpose. An operator who can write one can write
 the other, and the same renderer patterns (peer sets, port rules, "any policy allows")
 apply. As with NetworkPolicy, a node selected by no policy of a given type is open in
 that direction; a node selected by one is closed except for what is listed. Several
-policies selecting one node are unioned.
+policies selecting one node are unioned, and a node is enforcing for a direction only
+when every policy that selects it for that direction is in `Enforce`: one permissive
+policy keeps the node observing.
 
 Ports and the API server address that the safe rules need are arguments to the daemon
 with defaults matching the cluster's conventions (NodePort range `30000-32767`, API
@@ -72,39 +76,68 @@ MetalLB in L2 mode is not on the list because it does not need to be: ARP is not
 never reaches an `inet` table, IPv6 neighbour discovery is covered by the ICMPv6 rule,
 and traffic to a load balancer address is DNATed by kube-proxy and goes through
 `forward`. Its speakers' memberlist port is an ordinary thing for the operator to allow,
-and if they forget, the mechanism below is what catches it.
+and if they forget, permissive mode is what shows it.
 
 Accepting these unconditionally is a deliberate coarseness for a first version: an
 operator cannot restrict SSH to a management range through a NodePolicy. Narrowing a
 safe rule by source is a later change to this record, not a reason to start without
 them.
 
-### Commit-confirmed apply
+### Permissive by default
 
-Every apply that changes the node rules is provisional until the API server has been
-reached through the new ruleset.
+A NodePolicy is rendered the same way in both modes: the safe rules, then the dispatch
+into the policy chains, then the verdict for a packet no rule accepted. Only that final
+verdict differs.
 
-1. The daemon keeps the last confirmed table text.
-2. It applies the new table and starts a timer (30 seconds by default).
-3. It makes a request for its own Node object over a fresh connection. The connection
-   is deliberately new so that a `ct state established` rule cannot make a broken policy
-   look fine.
-4. On success before the timer expires, the new text becomes the last confirmed one and
-   status for this node reads `Applied`.
-5. Otherwise it reapplies the last confirmed text, records `RolledBack` with the reason
-   on the policy's status once the API server is reachable again, and does not try that
-   generation of the policy again. A new generation (an edit) starts over.
+| Mode | Final verdict in the dispatch chain |
+|---|---|
+| `Permissive` | `limit rate` → `log prefix "cnidaria-nodepolicy "` → `counter` → fall through to the base chain's `policy accept` |
+| `Enforce` | `counter` → `drop` |
 
-The check is coarse — it proves the API server is reachable, not that SSH is — which is
-why the safe rules exist as well. The two guard different mistakes: the safe rules
-cover the ports a node must never lose, the confirmation covers the case where the
-operator's own egress rule breaks the daemon's ability to receive the fix.
+In `Permissive` a packet that the policy would deny is accepted, its source, destination,
+protocol and port appear in the kernel log (and so in journald on the node) with the
+prefix above, and the counter on the rule keeps the total. The rate limit keeps a busy
+node from flooding its log; the counter is not rate-limited, so the count is exact even
+when the log is sampled.
 
-At start-up, the daemon applies nothing for node policy until it has listed the API
-once. If an `inet cnidaria` table from an earlier run exists and the API server cannot
-be reached within the confirmation window, the daemon rewrites that table's `input` and
-`output` chains to hold only the safe rules, then keeps trying. A daemon restarted onto
-a node it locked out on its previous run therefore opens the door itself.
+The way to bring a policy into service is therefore:
+
+1. Apply it in `Permissive`, which is what an object without `spec.mode` gets.
+2. Watch the log and the counter for as long as the traffic pattern needs — a full day
+   for a node whose backups run at night.
+3. Add the entries the log shows are missing, and set `spec.mode: Enforce`.
+
+The two layers guard against different mistakes. **The safe rules** are for what a node
+must never lose whatever the policy says; they hold in both modes and need no operator
+action. **Permissive mode** is for everything else the operator forgot — a metrics
+scraper, a memberlist port, a backup target — which cannot be enumerated in advance and
+which the node can survive losing, but should not lose by surprise. The first makes a
+policy unable to lock a node out; the second makes its whole effect visible before it
+has any.
+
+Because nothing about the ruleset changes between the modes except one verdict, what
+was observed in `Permissive` is exactly what `Enforce` will do. There is no second
+rendering to trust.
+
+### Considered and not taken: commit-confirmed apply
+
+The first version of this record chose a commit-confirmed apply: every change to the
+node rules was provisional, the daemon opened a fresh connection to the API server
+through the new ruleset, and a failure to reach it within a timer rolled the previous
+ruleset back and marked the generation as failed. On start-up, a leftover table with an
+unreachable API server was rewritten to the safe rules alone.
+
+It was replaced because of what it costs against what it proves. The mechanism is a
+timer, a dedicated probe connection, a remembered last-good ruleset, per-generation
+memory of what failed, and a start-up path that undoes a previous run — a state machine
+whose own bugs would sit in the code path that runs during an outage. And all of it
+proves one thing: that the API server is reachable. It says nothing about SSH, about a
+metrics scraper, or about the backup target. Permissive mode has no state machine at
+all — it swaps one verdict — and it shows the whole effect of a policy, not the one
+effect a probe can check.
+
+If an `Enforce` apply ever causes a lockout in practice despite the safe rules and the
+permissive step, this record is where that decision is revisited.
 
 ### Generated, not hand-written
 
@@ -114,6 +147,9 @@ DeepCopy methods are generated from them (ADR 0007). The manifest is committed s
 
 ## Consequences
 
+- The daemon needs no memory across applies for node policy: each reconcile renders
+  the ruleset from the objects it sees, in whichever mode they declare, and applies it
+  (ADR 0003). Start-up is the same as any other reconcile.
 - Ingress from pods to the node's own sockets (a pod reaching a hostNetwork service, or
   metrics scraped from the node) is governed by NodePolicy like any other source, using
   the pod CIDRs in `ipBlock`. Pod selectors as node-policy peers can be added when a
@@ -121,8 +157,13 @@ DeepCopy methods are generated from them (ADR 0007). The manifest is committed s
   the safe-rule reasoning simple.
 - Status on a cluster-scoped object is written by every selected node. The status
   subresource and a per-node entry keep those writes from colliding.
-- A policy of type `Egress` on a node whose operator forgot NTP or a package mirror
-  breaks those quietly. That is the ordinary consequence of default-deny and is what the
-  `Egress` type opting in is for.
-- The netns testbed (ADR 0008) asserts both halves: that a selected node rejects an
-  unlisted port, and that kubelet-style and API-server-style connections survive.
+- A policy left in `Permissive` protects nothing. That is visible in `status.nodes[]`
+  and in the object itself, and it is the intended default: an operator has to choose
+  to enforce.
+- The log prefix is part of the interface. Tools that read the journal for it should
+  expect the prefix to stay and the fields to be those nftables `log` emits.
+- The same `mode` on NetworkPolicy — observing what a pod policy would drop before it
+  drops it — is a natural later addition and is outside this task.
+- The netns testbed (ADR 0008) asserts, for a selected node, that an unlisted port is
+  logged and counted but reachable in `Permissive`, rejected in `Enforce`, and that
+  kubelet-style and API-server-style connections survive in both.

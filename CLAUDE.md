@@ -35,7 +35,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 - **nftables のテーブルは `inet cnidaria` の 1 つ。** `nft -f` でテーブル単位に不可分に置き換え、
   ruleset 全体を flush しない。kube-proxy のテーブルには触らない（ADR 0003）
 - **NodePolicy CRD は cluster-scoped。** ノードを締め出さない安全ルールはポリシーで消せず、
-  適用後に apiserver へ到達できなければロールバックする（ADR 0004）
+  既定は permissive（drop せずログと counter で見せる）で、`Enforce` は明示的に選ぶ（ADR 0004）
 - **IPAM は `host-local`。** ranges は `node.spec.podCIDRs` から書く（ADR 0005）
 - **経路は family ごと。** 相手ノードの InternalIP をネクストホップにし、片方の family が
   無ければその family の経路は入れず警告する（ADR 0006）
@@ -65,7 +65,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `internal/routes` | 他ノードの PodCIDR への host-gw 経路を family ごとに保つ |
 | `internal/netpol` | NetworkPolicy v1 の意味論を chain / set のモデルに変換する |
 | `internal/nodepol` | NodePolicy と、消せない安全ルールを chain のモデルに変換する |
-| `internal/nftables` | モデルを nft テキストに描画し、`nft -f` で適用し、commit-confirmed の確認を行う |
+| `internal/nftables` | モデルを nft テキストに描画し、`nft -f` で適用する |
 | `internal/controller` | controller-runtime の reconciler。経路用と ruleset 用の 2 つ |
 | `internal/sysctl` | 起動時の kernel 設定検査（`br_netfilter`、forwarding） |
 | `test/netns` | build tag `netns` の統合テスト。netns で「ノード」を組んで外から検証する |

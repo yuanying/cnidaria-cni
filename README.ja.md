@@ -22,7 +22,8 @@ English version: [README.md](README.md)
 - NetworkPolicy v1（podSelector、namespaceSelector、ipBlock、ports、endPort、policyTypes、
   「選択されたら隔離」）を 1 つの nftables テーブル `inet cnidaria` に描画する
 - cluster-scoped の `NodePolicy` を受け取り、ノード自身の `input` / `output` に適用する。
-  ポリシーで消せない安全ルールを持ち、適用後に apiserver へ到達できなければロールバックする
+  ポリシーで消せない安全ルールを持つ。既定は permissive で、drop されるはずのものをログに出して
+  数え、`Enforce` を選ぶまで落とさない
 - クラスターネットワークの外へ出る Pod のトラフィックを送信元 NAT する
 
 ## しないこと
