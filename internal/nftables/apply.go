@@ -46,6 +46,13 @@ func NewApplier(r Runner) *Applier {
 	return &Applier{run: r}
 }
 
+// Forget makes the next Apply run nft whether or not the text has changed. The
+// reconciler calls it on its periodic resync, so that a table someone removed behind
+// the daemon's back is put back instead of being skipped as unchanged.
+func (a *Applier) Forget() {
+	a.applied = ""
+}
+
 // Apply replaces the table with text unless text is what was last applied. It reports
 // whether nft was run. A failed nft -f leaves the node as it was, the file being one
 // transaction, so the text is not remembered and the next Apply tries it again.
