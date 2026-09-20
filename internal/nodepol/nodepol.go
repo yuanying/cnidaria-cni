@@ -34,6 +34,19 @@ type Node struct {
 	Labels map[string]string
 }
 
+// PolicyError is a policy that could not be rendered, and says which one. The daemon
+// puts the message in that policy's status rather than in every policy's (ADR 0004).
+type PolicyError struct {
+	Policy string
+	Err    error
+}
+
+func (e *PolicyError) Error() string { return fmt.Sprintf("nodepol: policy %s: %s", e.Policy, e.Err) }
+
+func (e *PolicyError) Unwrap() error { return e.Err }
+
+func policyError(policy string, err error) error { return &PolicyError{Policy: policy, Err: err} }
+
 // Add renders every NodePolicy that selects the node into rs and reports the mode each
 // of those policies took effect in, which is what the node writes back to the status of
 // each (ADR 0004). A policy asking for Enforce reports Permissive while a permissive
@@ -165,13 +178,13 @@ func (d direction) entries(p v1alpha1.NodePolicy) []entry {
 func (d direction) chainFor(p v1alpha1.NodePolicy) (nftables.Chain, error) {
 	name, err := nftables.Identifier(d.prefix, p.Name)
 	if err != nil {
-		return nftables.Chain{}, fmt.Errorf("nodepol: policy %s: %w", p.Name, err)
+		return nftables.Chain{}, policyError(p.Name, err)
 	}
 	var rules []nftables.Rule
 	for _, e := range d.entries(p) {
 		matches, err := d.matches(e)
 		if err != nil {
-			return nftables.Chain{}, fmt.Errorf("nodepol: policy %s: %s: %w", p.Name, d.name, err)
+			return nftables.Chain{}, policyError(p.Name, fmt.Errorf("%s: %w", d.name, err))
 		}
 		for _, m := range matches {
 			rules = append(rules, nftables.Rule{Match: m, Verdict: "accept", Comment: comment(p.Name)})
@@ -223,7 +236,7 @@ func selects(node Node, policies []v1alpha1.NodePolicy) ([]v1alpha1.NodePolicy, 
 	for _, p := range policies {
 		selector, err := metav1.LabelSelectorAsSelector(&p.Spec.NodeSelector)
 		if err != nil {
-			return nil, fmt.Errorf("nodepol: policy %s: nodeSelector: %w", p.Name, err)
+			return nil, policyError(p.Name, fmt.Errorf("nodeSelector: %w", err))
 		}
 		if selector.Matches(labels.Set(node.Labels)) {
 			selected = append(selected, p)

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"time"
@@ -13,12 +14,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/yuanying/cnidaria-cni/internal/apis/v1alpha1"
 	"github.com/yuanying/cnidaria-cni/internal/netpol"
 	"github.com/yuanying/cnidaria-cni/internal/nftables"
+	"github.com/yuanying/cnidaria-cni/internal/nodepol"
 )
 
 // Ruleset keeps this node's nftables table in step with what the API server says
@@ -26,8 +31,9 @@ import (
 // same request, so the work queue collapses a burst of them into one recompute of the
 // whole table, which is the debounce ADR 0003 asks for.
 type Ruleset struct {
-	// Reader is the manager's cache.
-	client.Reader
+	// Client is the manager's client: reads come from its cache, and the status of
+	// a NodePolicy is written through it to the API server.
+	client.Client
 	// NodeName is the node this daemon runs on: its pod CIDRs are the table's, and
 	// only its own pods are enforced here (ADR 0003).
 	NodeName string
@@ -60,6 +66,12 @@ func (r *Ruleset) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Namespace{}, one).
 		Watches(&networkingv1.NetworkPolicy{}, one).
 		Watches(&corev1.Node{}, one).
+		// Every selected node writes its own entry into a policy's status, and
+		// those writes reach every other node. The generation is what a policy
+		// says, so a change to it is what the table is rendered from; a status
+		// carries no generation and is skipped here, while the cache still holds
+		// the new one for the comparison that decides the next write.
+		Watches(&v1alpha1.NodePolicy{}, one, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -70,65 +82,78 @@ func (r *Ruleset) SetupWithManager(mgr ctrl.Manager) error {
 func (r *Ruleset) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	text, err := r.render(ctx, log)
+	text, status, err := r.render(ctx, log)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if text == "" {
-		return ctrl.Result{RequeueAfter: Resync}, nil
+	if text != "" {
+		if time.Since(r.lastApply) >= Resync {
+			r.Applier.Forget()
+		}
+		changed, err := r.Applier.Apply(ctx, text)
+		if err != nil {
+			// The status says what the node is running, and it is not running
+			// this, so nothing is written about it.
+			return ctrl.Result{}, fmt.Errorf("apply the nftables table: %w", err)
+		}
+		if changed {
+			r.lastApply = time.Now()
+			log.Info("applied the nftables table")
+		}
 	}
-	if time.Since(r.lastApply) >= Resync {
-		r.Applier.Forget()
-	}
-	changed, err := r.Applier.Apply(ctx, text)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("apply the nftables table: %w", err)
-	}
-	if changed {
-		r.lastApply = time.Now()
-		log.Info("applied the nftables table")
+	// The status goes after the table: the mode it carries is the mode the node is
+	// running, not the one it is about to (ADR 0004). A render that produced no
+	// table writes a status all the same, that being where a policy the renderer
+	// refused says so. Failing to write it does not undo the apply; it comes back
+	// as an error, which the manager logs and backs off on.
+	if err := r.writeStatus(ctx, status); err != nil {
+		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: Resync}, nil
 }
 
 // render reads everything the table depends on and returns the text to apply, or ""
-// when there is nothing to apply yet or nothing that can be applied.
+// when there is nothing to apply yet or nothing that can be applied, together with
+// what this node has to say in the status of each NodePolicy.
 //
 // Rendering can fail on what the API server holds — a name nft cannot read, an
 // ipBlock that is not a prefix. Retrying that would fail the same way, and applying
 // what did render would be a table with a policy silently missing from it, so the
 // failure is reported and the node keeps the table it is already running. The next
 // change to the offending object brings another reconcile.
-func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, error) {
+func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, []policyStatus, error) {
 	var nodes corev1.NodeList
 	if err := r.List(ctx, &nodes); err != nil {
-		return "", fmt.Errorf("list nodes: %w", err)
+		return "", nil, fmt.Errorf("list nodes: %w", err)
 	}
 	var params nftables.Params
 	params.SafePorts = r.SafePorts
+	// The labels of this node's own object are what a NodePolicy selects on.
+	var labels map[string]string
 	for i := range nodes.Items {
 		cidrs := fromNode(&nodes.Items[i], log).PodCIDRs
 		params.ClusterPodCIDRs = append(params.ClusterPodCIDRs, cidrs...)
 		if nodes.Items[i].Name == r.NodeName {
 			params.PodCIDRs = cidrs
+			labels = nodes.Items[i].Labels
 		}
 	}
 	if len(params.PodCIDRs) == 0 {
 		log.Info("this node has no pod CIDR yet; the table is not rendered", "node", r.NodeName)
-		return "", nil
+		return "", nil, nil
 	}
 
 	var pods corev1.PodList
 	if err := r.List(ctx, &pods); err != nil {
-		return "", fmt.Errorf("list pods: %w", err)
+		return "", nil, fmt.Errorf("list pods: %w", err)
 	}
 	var namespaces corev1.NamespaceList
 	if err := r.List(ctx, &namespaces); err != nil {
-		return "", fmt.Errorf("list namespaces: %w", err)
+		return "", nil, fmt.Errorf("list namespaces: %w", err)
 	}
 	var policies networkingv1.NetworkPolicyList
 	if err := r.List(ctx, &policies); err != nil {
-		return "", fmt.Errorf("list network policies: %w", err)
+		return "", nil, fmt.Errorf("list network policies: %w", err)
 	}
 
 	p := netpol.Params{NodeName: r.NodeName}
@@ -144,7 +169,7 @@ func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, error) {
 		policy, err := fromNetworkPolicy(&policies.Items[i])
 		if err != nil {
 			log.Error(err, "the node's table was not rendered; the table already on the node stays in place")
-			return "", nil
+			return "", nil, nil
 		}
 		p.Policies = append(p.Policies, policy)
 	}
@@ -153,12 +178,128 @@ func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, error) {
 	if err == nil {
 		err = netpol.Add(ruleset, p)
 	}
-	// The NodePolicy renderer adds to the same ruleset here, before it is applied.
 	if err != nil {
 		log.Error(err, "the node's table was not rendered; the table already on the node stays in place")
-		return "", nil
+		return "", nil, nil
 	}
-	return ruleset.String(), nil
+
+	status, err := r.addNodePolicies(ctx, ruleset, labels)
+	if err != nil {
+		// A policy the renderer refuses is a fault in what the API server holds,
+		// so it is reported in that policy's status and the node keeps the table
+		// it is running. Anything else is the node's problem and is retried.
+		var refused *nodepol.PolicyError
+		if !errors.As(err, &refused) {
+			return "", nil, err
+		}
+		log.Error(err, "the node's table was not rendered; the table already on the node stays in place")
+		return "", status, nil
+	}
+	return ruleset.String(), status, nil
+}
+
+// policyStatus is what this node has to say about one NodePolicy: the entry it should
+// hold in status.nodes[], or none at all when the policy does not select this node.
+type policyStatus struct {
+	policy *v1alpha1.NodePolicy
+	entry  *v1alpha1.NodePolicyNodeStatus
+}
+
+// addNodePolicies renders the NodePolicies that select this node into the ruleset,
+// behind the safe rules a policy cannot remove (ADR 0004). The status that goes with
+// a refused policy is returned along with the error, so that the policy at fault is
+// the one that carries the message.
+func (r *Ruleset) addNodePolicies(ctx context.Context, ruleset *nftables.Ruleset, labels map[string]string) ([]policyStatus, error) {
+	var policies v1alpha1.NodePolicyList
+	if err := r.List(ctx, &policies); err != nil {
+		return nil, fmt.Errorf("list node policies: %w", err)
+	}
+	node := nodepol.Node{Name: r.NodeName, Labels: labels}
+	modes, err := nodepol.Add(ruleset, node, policies.Items)
+	if err != nil {
+		var refused *nodepol.PolicyError
+		if !errors.As(err, &refused) {
+			return nil, err
+		}
+		for i := range policies.Items {
+			if policies.Items[i].Name != refused.Policy {
+				continue
+			}
+			return []policyStatus{{
+				policy: &policies.Items[i],
+				entry: &v1alpha1.NodePolicyNodeStatus{
+					Name:               r.NodeName,
+					ObservedGeneration: policies.Items[i].Generation,
+					Message:            refused.Err.Error(),
+				},
+			}}, err
+		}
+		return nil, err
+	}
+
+	status := make([]policyStatus, 0, len(policies.Items))
+	for i := range policies.Items {
+		policy := &policies.Items[i]
+		entry := &v1alpha1.NodePolicyNodeStatus{
+			Name:               r.NodeName,
+			ObservedGeneration: policy.Generation,
+			Mode:               modes[policy.Name],
+		}
+		if _, selected := modes[policy.Name]; !selected {
+			entry = nil
+		}
+		status = append(status, policyStatus{policy: policy, entry: entry})
+	}
+	return status, nil
+}
+
+// writeStatus puts this node's entry into the status of each policy and sends nothing
+// where the entry is already what it should be: every selected node writes to the same
+// object, and a needless write is a resource version every other node has to take.
+func (r *Ruleset) writeStatus(ctx context.Context, status []policyStatus) error {
+	for _, s := range status {
+		nodes, changed := withEntry(s.policy.Status.Nodes, r.NodeName, s.entry)
+		if !changed {
+			continue
+		}
+		policy := s.policy.DeepCopy()
+		policy.Status.Nodes = nodes
+		if err := r.Status().Update(ctx, policy); err != nil {
+			return fmt.Errorf("status of NodePolicy %s: %w", policy.Name, err)
+		}
+	}
+	return nil
+}
+
+// withEntry replaces this node's entry in the list, adds it, or takes it out when
+// entry is nil, and says whether that changed anything. The entries of the other
+// nodes are carried over as they are: a node speaks for itself only (ADR 0004).
+func withEntry(nodes []v1alpha1.NodePolicyNodeStatus, name string, entry *v1alpha1.NodePolicyNodeStatus) ([]v1alpha1.NodePolicyNodeStatus, bool) {
+	out := make([]v1alpha1.NodePolicyNodeStatus, 0, len(nodes)+1)
+	found := false
+	for _, node := range nodes {
+		switch {
+		case node.Name != name:
+			out = append(out, node)
+		case entry != nil && node == *entry:
+			return nil, false
+		default:
+			found = true
+			if entry != nil {
+				out = append(out, *entry)
+			}
+		}
+	}
+	if !found {
+		// Nothing of this node's is in the list and nothing of it belongs there:
+		// the policy does not select this node and never did. Saying so with a
+		// write would be a write from every unselected node on every event.
+		if entry == nil {
+			return nil, false
+		}
+		out = append(out, *entry)
+	}
+	return out, true
 }
 
 // fromPod reads what the policy renderer needs off a Pod. A value that does not parse
