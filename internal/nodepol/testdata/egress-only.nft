@@ -1,0 +1,133 @@
+# cnidaria's nftables table. Generated on every apply; edits here do not survive one.
+#
+# cnidaria owns this one table and nothing else in the ruleset, so the ruleset is never
+# flushed and no rule anybody else installed, kube-proxy's included, is touched
+# (ADR 0003). The two statements below add the table if it is not already there and
+# then remove it, so that the one that follows goes in whether or not a previous apply
+# left anything behind. nft runs the whole file as a single transaction, so the table
+# is never half replaced.
+
+table inet cnidaria
+delete table inet cnidaria
+
+table inet cnidaria {
+	# This node's pod CIDRs (node.spec.podCIDRs)
+	set node_pods_v4 {
+		type ipv4_addr
+		flags interval
+		elements = { 192.0.2.0/24 }
+	}
+
+	set node_pods_v6 {
+		type ipv6_addr
+		flags interval
+		elements = { 2001:db8:1::/64 }
+	}
+
+	# Every node's pod CIDRs: traffic to these stays inside the cluster and is not masqueraded
+	set cluster_pods_v4 {
+		type ipv4_addr
+		flags interval
+		elements = { 192.0.2.0/24, 198.51.100.0/24 }
+	}
+
+	set cluster_pods_v6 {
+		type ipv6_addr
+		flags interval
+		elements = { 2001:db8:1::/64, 2001:db8:2::/64 }
+	}
+
+	# Pods selected by at least one NetworkPolicy of that policyType; filled by the NetworkPolicy renderer
+	set isolated_egress_v4 {
+		type ipv4_addr
+	}
+
+	set isolated_egress_v6 {
+		type ipv6_addr
+	}
+
+	set isolated_ingress_v4 {
+		type ipv4_addr
+	}
+
+	set isolated_ingress_v6 {
+		type ipv6_addr
+	}
+
+	# NetworkPolicy egress, keyed on the source pod (ADR 0003)
+	chain egress {
+		type filter hook forward priority filter; policy accept;
+		ct state established,related counter accept comment "replies follow the connection"
+		ip saddr @isolated_egress_v4 counter jump egress_dispatch comment "isolated for egress"
+		ip6 saddr @isolated_egress_v6 counter jump egress_dispatch comment "isolated for egress"
+	}
+
+	# One jump per NetworkPolicy goes ahead of the drop
+	chain egress_dispatch {
+		counter drop comment "isolated pod, no policy accepted"
+	}
+
+	# NetworkPolicy ingress, keyed on the destination pod (ADR 0003)
+	chain ingress {
+		type filter hook forward priority filter + 1; policy accept;
+		ct state established,related counter accept comment "replies follow the connection"
+		ip daddr @isolated_ingress_v4 counter jump ingress_dispatch comment "isolated for ingress"
+		ip6 daddr @isolated_ingress_v6 counter jump ingress_dispatch comment "isolated for ingress"
+	}
+
+	# One jump per NetworkPolicy goes ahead of the drop
+	chain ingress_dispatch {
+		counter drop comment "isolated pod, no policy accepted"
+	}
+
+	# NodePolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
+	chain input {
+		type filter hook input priority filter; policy accept;
+		ct state established,related counter accept comment "safe: replies to what the node opened"
+		iifname "lo" counter accept comment "safe: loopback"
+		icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } counter accept comment "safe: icmp"
+		icmpv6 type { echo-request, destination-unreachable, time-exceeded, parameter-problem, packet-too-big, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, mld-listener-query, mld-listener-report, mld-listener-done, mld2-listener-report } counter accept comment "safe: icmpv6"
+		tcp dport 22 counter accept comment "safe: ssh"
+		tcp dport 10250 counter accept comment "safe: kubelet"
+		tcp dport 6443 counter accept comment "safe: apiserver"
+		tcp dport 2379-2380 counter accept comment "safe: etcd"
+		tcp dport 30000-32767 counter accept comment "safe: nodeport"
+		udp dport 30000-32767 counter accept comment "safe: nodeport"
+	}
+
+	# NodePolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
+	chain output {
+		type filter hook output priority filter; policy accept;
+		ct state established,related counter accept comment "safe: replies to what the node opened"
+		oifname "lo" counter accept comment "safe: loopback"
+		icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } counter accept comment "safe: icmp"
+		icmpv6 type { echo-request, destination-unreachable, time-exceeded, parameter-problem, packet-too-big, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, mld-listener-query, mld-listener-report, mld-listener-done, mld2-listener-report } counter accept comment "safe: icmpv6"
+		tcp dport 6443 counter accept comment "safe: apiserver"
+		tcp dport 2379-2380 counter accept comment "safe: etcd"
+		tcp dport 10250 counter accept comment "safe: kubelet"
+		tcp dport 53 counter accept comment "safe: dns"
+		udp dport 53 counter accept comment "safe: dns"
+		ip daddr @node_pods_v4 counter accept comment "safe: this node's pods"
+		ip6 daddr @node_pods_v6 counter accept comment "safe: this node's pods"
+		counter jump output_dispatch comment "nodepolicy: everything the safe rules did not accept"
+	}
+
+	# Masquerade for pod traffic leaving the cluster's pod CIDRs (ADR 0001, ADR 0003)
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr @node_pods_v4 ip daddr != @cluster_pods_v4 counter masquerade comment "pod traffic leaving the cluster"
+		ip6 saddr @node_pods_v6 ip6 daddr != @cluster_pods_v6 counter masquerade comment "pod traffic leaving the cluster"
+	}
+
+	# NodePolicy upstream, egress
+	chain nodepol_out_upstream {
+		ip daddr 203.0.113.0/24 tcp dport 443 counter accept comment "nodepolicy upstream"
+		ip6 daddr 2001:db8:3::/64 counter accept comment "nodepolicy upstream"
+	}
+
+	# NodePolicy egress: one jump per policy, then what Enforce does with the rest
+	chain output_dispatch {
+		counter jump nodepol_out_upstream comment "nodepolicy upstream"
+		counter drop comment "nodepolicy: no rule accepted"
+	}
+}

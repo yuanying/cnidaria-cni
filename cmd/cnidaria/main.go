@@ -10,6 +10,8 @@ import (
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/yuanying/cnidaria-cni/internal/apis/v1alpha1"
 	"github.com/yuanying/cnidaria-cni/internal/controller"
 	"github.com/yuanying/cnidaria-cni/internal/nftables"
 	"github.com/yuanying/cnidaria-cni/internal/routes"
@@ -61,7 +64,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("kubeconfig: %w", err)
 	}
+	// The core types and the NodePolicy CRD are read through one scheme (ADR 0007).
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{clientgoscheme.AddToScheme, v1alpha1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			return fmt.Errorf("scheme: %w", err)
+		}
+	}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme: scheme,
 		Cache: cache.Options{
 			DefaultTransform: cache.TransformStripManagedFields(),
 			// Every node holds every pod: a policy peer may name one anywhere
@@ -102,7 +113,7 @@ func run() error {
 		return fmt.Errorf("routes reconciler: %w", err)
 	}
 	ruleset := &controller.Ruleset{
-		Reader:    mgr.GetCache(),
+		Client:    mgr.GetClient(),
 		NodeName:  *nodeName,
 		SafePorts: nftables.DefaultSafePorts,
 		Applier:   nftables.NewApplier(nftables.NFT{}),

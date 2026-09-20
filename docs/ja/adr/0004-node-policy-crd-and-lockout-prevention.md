@@ -35,7 +35,7 @@ drop するルールの最初の適用は、稼働中のクラスター上で、
 | `spec.ingress[]` | 各エントリは `from[]` の相手と `ports[]`。type `Ingress` のポリシーに選択されたノードは、いずれかのエントリが許すものだけを `input` で受け入れる |
 | `spec.egress[]` | 各エントリは `to[]` の相手と `ports[]`。同様に `output` で |
 | 相手 | `cidr` と `except` を持つ `ipBlock`。Pod や namespace のセレクタはここでは相手にならない。ノードはクラスターではなくネットワークによって指される |
-| ポート | NetworkPolicy と同じく `protocol`、`port`、`endPort` |
+| ポート | NetworkPolicy と同じく `protocol`、`port`、`endPort`。ただしポートは常に数値で指定する。ノードにはコンテナポートが無く、名前が指すものが存在しないため |
 | `status.nodes[]` | 選択されたノードごとに、`observedGeneration`、その generation を適用した `mode`、そしてレンダリングできなかったときの `message` |
 
 語彙は意図して NetworkPolicy のものである。片方を書けるオペレーターはもう片方も書け、

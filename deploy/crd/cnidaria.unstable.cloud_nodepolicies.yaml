@@ -1,0 +1,357 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: nodepolicies.cnidaria.unstable.cloud
+spec:
+  group: cnidaria.unstable.cloud
+  names:
+    kind: NodePolicy
+    listKind: NodePolicyList
+    plural: nodepolicies
+    shortNames:
+    - nodepol
+    singular: nodepolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodePolicy governs what may reach and what may leave the node itself, which is the
+          traffic NetworkPolicy does not describe (ADR 0004). It is cluster-scoped, selects
+          nodes by label, and drops nothing until an operator asks for Enforce.
+
+          A node selected by no policy of a direction is open in that direction; a node
+          selected by one accepts only what its rules list. Several policies selecting one
+          node are unioned. The rules that keep a node reachable whatever a policy says —
+          established traffic, loopback, the ICMP types a host needs, SSH, kubelet, the API
+          server, etcd and the NodePort range — sit ahead of every policy and no field here
+          turns them off.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              NodePolicySpec is the policy itself. Its vocabulary is NetworkPolicy's on purpose:
+              an operator who can write one can write the other.
+            properties:
+              egress:
+                description: egress lists what a selected node may send, with the
+                  same defaults as ingress.
+                items:
+                  description: |-
+                    NodePolicyEgressRule allows traffic that matches one of its peers and one of its
+                    ports.
+                  properties:
+                    ports:
+                      description: ports are the destination ports this rule allows.
+                        Empty allows every port.
+                      items:
+                        description: |-
+                          NodePolicyPort is one protocol and one port or range of ports. Ports are numbers
+                          here and never names: a node has no container ports for a name to refer to.
+
+                          What a range has to hold is stated to the API server as well as checked when the
+                          rule is rendered, so that an object the node cannot render is refused by kubectl
+                          apply rather than accepted and then reported back in status.
+                        properties:
+                          endPort:
+                            description: |-
+                              endPort, together with port, makes the rule cover port through endPort
+                              inclusive. It may not be given without port and may not be below it.
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          port:
+                            description: |-
+                              port is the port, or the first port of the range when endPort is set. Left
+                              out, the rule covers every port of the protocol.
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          protocol:
+                            default: TCP
+                            description: protocol is TCP, UDP or SCTP. It defaults
+                              to TCP.
+                            enum:
+                            - TCP
+                            - UDP
+                            - SCTP
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: endPort needs a port
+                          rule: '!has(self.endPort) || has(self.port)'
+                        - message: endPort must not be below port
+                          rule: '!has(self.endPort) || !has(self.port) || self.endPort
+                            >= self.port'
+                      type: array
+                    to:
+                      description: to are the destinations this rule allows. Empty
+                        allows every destination.
+                      items:
+                        description: |-
+                          NodePolicyPeer is the other end of the traffic. Pod and namespace selectors are not
+                          peers here: a node is addressed by the network, not by the cluster (ADR 0004). Pods
+                          are reached through their CIDRs like any other address.
+                        properties:
+                          ipBlock:
+                            description: ipBlock is a CIDR, with optional exceptions
+                              inside it.
+                            properties:
+                              cidr:
+                                description: |-
+                                  cidr is a string representing the IPBlock
+                                  Valid examples are "192.168.1.0/24" or "2001:db8::/64"
+                                type: string
+                              except:
+                                description: |-
+                                  except is a slice of CIDRs that should not be included within an IPBlock
+                                  Valid examples are "192.168.1.0/24" or "2001:db8::/64"
+                                  Except values will be rejected if they are outside the cidr range
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - cidr
+                            type: object
+                        required:
+                        - ipBlock
+                        type: object
+                      type: array
+                  type: object
+                type: array
+              ingress:
+                description: |-
+                  ingress lists what a selected node accepts. An entry with no peers accepts
+                  from anywhere, and one with no ports accepts on every port.
+                items:
+                  description: |-
+                    NodePolicyIngressRule allows traffic that matches one of its peers and one of its
+                    ports.
+                  properties:
+                    from:
+                      description: from are the sources this rule allows. Empty allows
+                        every source.
+                      items:
+                        description: |-
+                          NodePolicyPeer is the other end of the traffic. Pod and namespace selectors are not
+                          peers here: a node is addressed by the network, not by the cluster (ADR 0004). Pods
+                          are reached through their CIDRs like any other address.
+                        properties:
+                          ipBlock:
+                            description: ipBlock is a CIDR, with optional exceptions
+                              inside it.
+                            properties:
+                              cidr:
+                                description: |-
+                                  cidr is a string representing the IPBlock
+                                  Valid examples are "192.168.1.0/24" or "2001:db8::/64"
+                                type: string
+                              except:
+                                description: |-
+                                  except is a slice of CIDRs that should not be included within an IPBlock
+                                  Valid examples are "192.168.1.0/24" or "2001:db8::/64"
+                                  Except values will be rejected if they are outside the cidr range
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - cidr
+                            type: object
+                        required:
+                        - ipBlock
+                        type: object
+                      type: array
+                    ports:
+                      description: ports are the ports on the node this rule allows.
+                        Empty allows every port.
+                      items:
+                        description: |-
+                          NodePolicyPort is one protocol and one port or range of ports. Ports are numbers
+                          here and never names: a node has no container ports for a name to refer to.
+
+                          What a range has to hold is stated to the API server as well as checked when the
+                          rule is rendered, so that an object the node cannot render is refused by kubectl
+                          apply rather than accepted and then reported back in status.
+                        properties:
+                          endPort:
+                            description: |-
+                              endPort, together with port, makes the rule cover port through endPort
+                              inclusive. It may not be given without port and may not be below it.
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          port:
+                            description: |-
+                              port is the port, or the first port of the range when endPort is set. Left
+                              out, the rule covers every port of the protocol.
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          protocol:
+                            default: TCP
+                            description: protocol is TCP, UDP or SCTP. It defaults
+                              to TCP.
+                            enum:
+                            - TCP
+                            - UDP
+                            - SCTP
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: endPort needs a port
+                          rule: '!has(self.endPort) || has(self.port)'
+                        - message: endPort must not be below port
+                          rule: '!has(self.endPort) || !has(self.port) || self.endPort
+                            >= self.port'
+                      type: array
+                  type: object
+                type: array
+              mode:
+                default: Permissive
+                description: |-
+                  mode is Permissive (the default) or Enforce. A node enforces a direction only
+                  when every policy that closes that direction on it asks for Enforce, so one
+                  permissive policy keeps the node observing.
+                enum:
+                - Permissive
+                - Enforce
+                type: string
+              nodeSelector:
+                description: |-
+                  nodeSelector chooses the nodes this policy applies to. An empty selector
+                  selects every node.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              policyTypes:
+                description: |-
+                  policyTypes says which directions this policy closes. Left out, it follows
+                  NetworkPolicy's rule: Ingress always, Egress as well when egress rules are
+                  present.
+                items:
+                  description: PolicyType is a direction a policy closes.
+                  enum:
+                  - Ingress
+                  - Egress
+                  type: string
+                type: array
+            type: object
+          status:
+            description: NodePolicyStatus is what the nodes report back.
+            properties:
+              nodes:
+                description: |-
+                  nodes holds one entry per node that has applied this policy. Each selected
+                  node writes its own entry and leaves the others alone.
+                items:
+                  description: NodePolicyNodeStatus is one node's report.
+                  properties:
+                    message:
+                      description: |-
+                        message says why the policy could not be rendered on this node, and is empty
+                        when it could.
+                      type: string
+                    mode:
+                      description: |-
+                        mode is the mode that generation took effect in on this node. A policy asking
+                        for Enforce reads Permissive here for as long as another permissive policy
+                        shares a direction with it.
+                      enum:
+                      - Permissive
+                      - Enforce
+                      type: string
+                    name:
+                      description: name is the node's name.
+                      type: string
+                    observedGeneration:
+                      description: observedGeneration is the metadata.generation this
+                        node last rendered.
+                      format: int64
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -35,7 +35,7 @@ binary is renamed.
 | `spec.ingress[]` | Each entry: `from[]` peers and `ports[]`. A node selected by a policy with type `Ingress` accepts on `input` only what an entry allows |
 | `spec.egress[]` | Each entry: `to[]` peers and `ports[]`. Same, on `output` |
 | peer | `ipBlock` with `cidr` and `except`. Pod and namespace selectors are not peers here: a node is addressed by the network, not by the cluster |
-| port | `protocol`, `port`, `endPort`, as in NetworkPolicy |
+| port | `protocol`, `port`, `endPort`, as in NetworkPolicy, except that a port is always a number: a node has no container ports for a name to refer to |
 | `status.nodes[]` | Per selected node: `observedGeneration`, the `mode` that generation was applied in, and a `message` when it could not be rendered |
 
 The vocabulary is NetworkPolicy's on purpose. An operator who can write one can write
