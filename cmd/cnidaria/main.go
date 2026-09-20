@@ -2,17 +2,98 @@
 // hostNetwork) and looks after that node only: it writes the CNI conflist, keeps the
 // host-gw routes to the other nodes, and renders NetworkPolicy and NodePolicy into
 // the node's nftables table (ADR 0001, 0003, 0007).
-//
-// This is the entry point only. Wiring the controller-runtime manager, the
-// reconcilers and the start-up checks is the job of the units that implement them.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/yuanying/cnidaria-cni/internal/controller"
+	"github.com/yuanying/cnidaria-cni/internal/routes"
+	"github.com/yuanying/cnidaria-cni/internal/sysctl"
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "cnidaria: not implemented yet")
-	os.Exit(2)
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "cnidaria:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	var (
+		nodeName      = flag.String("node-name", os.Getenv("NODE_NAME"), "Name of the Node this daemon runs on. Defaults to $NODE_NAME.")
+		conflistPath  = flag.String("conflist", "/etc/cni/net.d/10-cnidaria.conflist", "Where to write the CNI configuration list.")
+		mtu           = flag.Int("mtu", 0, "MTU for the bridge and the pod interfaces. 0 reads it from the interface holding the node's InternalIP.")
+		ipamStoreName = flag.String("ipam-store-name", "", "Name of host-local's lease directory under /var/lib/cni/networks. Empty uses the network name. Set to the previous CNI's network name when migrating (ADR 0009).")
+		healthAddr    = flag.String("health-addr", "127.0.0.1:19080", "Address for the /healthz and /readyz probes.")
+		metricsAddr   = flag.String("metrics-addr", "0", "Address for Prometheus metrics. 0 disables them.")
+		zapOpts       zap.Options
+	)
+	ctrl.RegisterFlags(flag.CommandLine)
+	zapOpts.BindFlags(flag.CommandLine)
+	flag.Parse()
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+
+	if *nodeName == "" {
+		return fmt.Errorf("--node-name or NODE_NAME is required")
+	}
+	// Refusing to start is the point (ADR 0002): a warning would scroll away and
+	// the policy would silently miss half the traffic.
+	if err := sysctl.Check(sysctl.ProcSys); err != nil {
+		return fmt.Errorf("kernel settings the data plane needs are not in place:\n%w", err)
+	}
+
+	// One manager, no leader election (each node acts for itself), probes and
+	// metrics on localhost only (ADR 0007). managedFields are stripped from every
+	// cached object to keep memory down on small nodes.
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return fmt.Errorf("kubeconfig: %w", err)
+	}
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Cache:                  cache.Options{DefaultTransform: cache.TransformStripManagedFields()},
+		Metrics:                metricsserver.Options{BindAddress: *metricsAddr},
+		HealthProbeBindAddress: *healthAddr,
+	})
+	if err != nil {
+		return fmt.Errorf("manager: %w", err)
+	}
+	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+		return err
+	}
+	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+		return err
+	}
+
+	kernel, err := routes.NewKernel()
+	if err != nil {
+		return err
+	}
+	defer kernel.Close()
+	r := &controller.Routes{
+		Reader:   mgr.GetCache(),
+		NodeName: *nodeName,
+		Kernel:   kernel,
+		Conflist: controller.Conflist{
+			Path:     *conflistPath,
+			Name:     "cnidaria",
+			Bridge:   "cni0",
+			IPAMName: *ipamStoreName,
+			MTU:      *mtu,
+		},
+	}
+	if err := r.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("routes reconciler: %w", err)
+	}
+	// The ruleset reconciler (ADR 0003, 0004) is registered here once it exists.
+
+	return mgr.Start(ctrl.SetupSignalHandler())
 }
