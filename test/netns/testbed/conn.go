@@ -33,13 +33,25 @@ const (
 // whether a connection can be made, not what travels over it.
 func (p *Pod) Serve(t testing.TB, port uint16) {
 	t.Helper()
+	serve(t, p.NS, "pod "+p.Name, port)
+}
+
+// Serve on a node listens in the node's own namespace, which is where a NodePolicy
+// decides what may arrive (ADR 0004).
+func (n *Node) Serve(t testing.TB, port uint16) {
+	t.Helper()
+	serve(t, n.NS, "node "+n.Name, port)
+}
+
+func serve(t testing.TB, ns, who string, port uint16) {
+	t.Helper()
 	var listener net.Listener
-	if err := inNamespace(p.NS, func() error {
+	if err := inNamespace(ns, func() error {
 		var err error
 		listener, err = net.Listen("tcp", fmt.Sprintf(":%d", port))
 		return err
 	}); err != nil {
-		t.Fatalf("listening on port %d in pod %s: %v", port, p.Name, err)
+		t.Fatalf("listening on port %d in %s: %v", port, who, err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	go func() {
@@ -56,9 +68,21 @@ func (p *Pod) Serve(t testing.TB, port uint16) {
 // Connect makes one TCP connection from the pod's namespace and reports how it ended.
 func (p *Pod) Connect(t testing.TB, addr netip.Addr, port uint16, timeout time.Duration) Outcome {
 	t.Helper()
+	return connect(t, p.NS, "pod "+p.Name, addr, port, timeout)
+}
+
+// Connect from a node is the same from the node's own namespace: the end a NodePolicy
+// governs.
+func (n *Node) Connect(t testing.TB, addr netip.Addr, port uint16, timeout time.Duration) Outcome {
+	t.Helper()
+	return connect(t, n.NS, "node "+n.Name, addr, port, timeout)
+}
+
+func connect(t testing.TB, ns, who string, addr netip.Addr, port uint16, timeout time.Duration) Outcome {
+	t.Helper()
 	target := netip.AddrPortFrom(addr, port).String()
 	var outcome Outcome
-	err := inNamespace(p.NS, func() error {
+	err := inNamespace(ns, func() error {
 		conn, err := net.DialTimeout("tcp", target, timeout)
 		switch {
 		case err == nil:
@@ -76,7 +100,7 @@ func (p *Pod) Connect(t testing.TB, addr netip.Addr, port uint16, timeout time.D
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("connecting from pod %s to %s: %v", p.Name, target, err)
+		t.Fatalf("connecting from %s to %s: %v", who, target, err)
 	}
 	return outcome
 }
