@@ -71,7 +71,8 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `test/netns` | build tag `netns` の統合テスト。netns で「ノード」を組んで外から検証する |
 | `test/netns/testbed` | netns テストの共有基盤。セグメント・ノード・Pod の netns を組み、リファレンスプラグインで Pod を bridge に繋ぐ。ノードへの ruleset 適用と、Pod からの到達判定（drop と「誰も聞いていない」の区別を含む）もここ |
 | `hack/netns` | netns テストを回す特権コンテナのイメージと起動スクリプト |
-| `deploy` | kustomize（DaemonSet、RBAC、`crd/` に生成された CRD） |
+| `deploy` | kustomize（DaemonSet、RBAC、`crd/` に生成された CRD）。`kubectl apply -k deploy` で入る。配るイメージのタグは `kustomization.yaml` の `images:` |
+| `.github/workflows` | CI（lint / fmt-check / vet / test）と、タグ push でのマルチアーキイメージ公開 |
 | `docs/adr`, `docs/ja/adr` | 設計判断の記録（英語が正、日本語を併置） |
 
 ## 開発の進め方
