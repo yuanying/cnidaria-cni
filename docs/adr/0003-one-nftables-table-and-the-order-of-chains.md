@@ -1,6 +1,6 @@
 # ADR 0003: One nftables table, `inet cnidaria`, and the order its chains run in
 
-- Status: Accepted (2026-09-19)
+- Status: Accepted (2026-09-19), amended (2026-09-20)
 
 ## Context
 
@@ -79,20 +79,41 @@ The pattern in each of `egress` and `ingress`:
 3. In the dispatch chain, one rule per NetworkPolicy jumps into that policy's regular
    chain when the pod address is in that policy's selected-pods set.
 4. A policy chain holds one rule per `from` / `to` entry and port combination, matching
-   peer pod sets, namespace pod sets, `ipBlock` ranges (with `except` as a set with
-   intervals removed) and ports, each ending in `accept`. A policy chain that matches
-   nothing returns.
+   peer pod sets, namespace pod sets, `ipBlock` ranges and ports, each ending in
+   `accept`. A policy chain that matches nothing returns.
 5. The dispatch chain ends in `drop`. An isolated pod for which no policy accepted is
    denied.
 
 "Allowed if any policy allows" falls out of `accept` being final for the base chain and
 `return` falling through to the next policy.
 
+An `ipBlock`'s `except` list is a second, negated match on the same address in the same
+rule, rather than the ranges being subtracted from the set the rule reads. The two say
+the same thing: either way the rule does not match an excepted address, and what this
+rule does not match stays open to the next entry and the next policy. The choice is
+which is simpler, and the negated match is. Subtracting the ranges means doing interval
+arithmetic on prefixes while rendering; the negated match hands that to nft, which does
+it already, and leaves a rule an operator can read the `except` list straight out of.
+
+A port a policy names rather than numbers is resolved against whichever pods receive the
+traffic — the pods the policy selects on ingress, the pods the entry names on egress —
+and the rule carries the addresses of the pods that gave that name that number alongside
+the number itself. Two pods may give one name two numbers, or one of them may not
+declare it at all, so opening the number on every pod the rule covers would open a port
+nobody asked for.
+
 Pods become named sets of addresses, one per family, so a pod coming or going changes
 set contents and not chain structure. Rules carry `counter` and a `comment` with the
 namespace and name they came from, so `nft list ruleset` reads in the operator's own
-vocabulary. Names become nftables identifiers deterministically; a name that cannot be
-made into one is a render error.
+vocabulary. Names become nftables identifiers deterministically. A name with a
+character nft cannot read is a render error rather than text that would parse as
+something else, but a name that is merely too long is not: a namespace and a name can
+be 63 and 253 bytes, so nft's 255-byte identifier and 128-byte comment are both
+reachable without anybody doing anything odd, and refusing them would stop the node's
+whole table being updated until the object was renamed. An over-long identifier keeps
+its head and ends in a hash of the whole of it, which is a function of the name alone,
+so every node renders the same object to the same identifier. An over-long comment is
+cut with an ellipsis, a comment being read rather than matched on.
 
 ### Traffic from the node to its own pods is not pod policy
 
@@ -143,3 +164,17 @@ being true, sets can be updated incrementally without changing this layout.
 - A future `nftables`-mode kube-proxy writes its own `ip kube-proxy` tables. Nothing in
   this layout depends on kube-proxy's table names or chain names, only on where DNAT
   happens, which is the same.
+
+## Amendments
+
+**2026-09-20, when the NetworkPolicy renderer was written.** Step 4 above said an
+`ipBlock`'s `except` was "a set with intervals removed". It is a negated match instead.
+Both mean the same thing; the negated match needs no interval arithmetic of ours and
+reads back as what the operator wrote, which is the reason now given under the steps.
+
+The same amendment added the paragraph on a port a policy names rather than numbers,
+and replaced "a name that cannot be made into an identifier is a render error" with
+what the renderer does about length. Neither reverses a decision: the first had not
+been written down, and the second was found when a name at the API's own limits turned
+out to make an identifier and a comment that nft refuses, taking the node's whole table
+with them.
