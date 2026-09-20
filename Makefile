@@ -74,7 +74,7 @@ vet: ## Run go vet over every package, including the tagged tests.
 .PHONY: lint
 lint: ## Run golangci-lint through go tool.
 	$(GO) tool golangci-lint run ./...
-	$(GO) tool golangci-lint run --build-tags netns ./test/...
+	$(GO) tool golangci-lint run --build-tags netns ./...
 
 ##@ Test
 
@@ -99,7 +99,7 @@ CNIDARIA_NETNS_REQUIRE ?= 1
 
 .PHONY: test-netns
 test-netns: ## The netns integration tests. Needs root / CAP_NET_ADMIN, nft and ip.
-	CNIDARIA_NETNS_REQUIRE=$(CNIDARIA_NETNS_REQUIRE) $(GO) test -tags netns -count=1 -timeout 20m ./test/netns/...
+	CNIDARIA_NETNS_REQUIRE=$(CNIDARIA_NETNS_REQUIRE) $(GO) test -tags netns -count=1 -timeout 20m ./...
 
 .PHONY: netns-image
 netns-image: ## Build the container image for the netns integration tests.
