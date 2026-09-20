@@ -129,7 +129,23 @@ func (r Rule) String() string {
 	}
 	words = append(words, "counter", r.Verdict)
 	if r.Comment != "" {
-		words = append(words, fmt.Sprintf("comment %q", r.Comment))
+		words = append(words, fmt.Sprintf("comment %q", clipComment(r.Comment)))
 	}
 	return strings.Join(words, " ")
+}
+
+// commentMaxLen is the longest comment nft accepts on a rule. A longer one is not
+// truncated by nft, it is refused, and with it the whole file.
+const commentMaxLen = 128
+
+// clipComment cuts a comment down to what nft accepts. A namespace and a name
+// together reach 317 bytes at the limits the API allows, and a comment is read rather
+// than matched on, so the tail goes and an ellipsis says that it did. The model keeps
+// the whole text; only what nft is handed is cut.
+func clipComment(comment string) string {
+	const ellipsis = "..."
+	if len(comment) <= commentMaxLen {
+		return comment
+	}
+	return comment[:commentMaxLen-len(ellipsis)] + ellipsis
 }

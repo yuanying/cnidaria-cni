@@ -1,6 +1,8 @@
 package nftables
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -290,13 +292,23 @@ func postroutingChain() Chain {
 // have to hold. The kernel refuses a name of 256 bytes or more.
 var identifierPart = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
-const identifierMaxLen = 255
+const (
+	identifierMaxLen = 255
+	// How much of the hash a folded name ends in. Twelve hex digits of SHA-256 is
+	// far more than the few hundred names one node holds needs.
+	identifierHashLen = 12
+)
 
 // Identifier is the nftables name for the set or chain rendered from a Kubernetes
 // object. prefix says what kind of thing it is; the object's namespace and name follow,
 // joined with "/", which no Kubernetes name may contain, so two objects never share an
 // identifier. A name nft could not read back is an error rather than text that would
 // parse as something else (ADR 0003).
+//
+// A name too long for nft is folded rather than refused: a namespace and a name may
+// each be up to 63 and 253 bytes, so the limit is reachable without anybody doing
+// anything odd, and refusing it would stop the whole table of that node being updated
+// until the policy was renamed.
 func Identifier(prefix string, parts ...string) (string, error) {
 	if len(parts) == 0 {
 		return "", errors.New("nftables: an identifier needs a name")
@@ -308,7 +320,17 @@ func Identifier(prefix string, parts ...string) (string, error) {
 	}
 	id := prefix + strings.Join(parts, "/")
 	if len(id) > identifierMaxLen {
-		return "", fmt.Errorf("nftables: %q is longer than the %d bytes nft allows", id, identifierMaxLen)
+		id = fold(id)
 	}
 	return id, nil
+}
+
+// fold replaces the tail of an over-long name with a hash of the whole of it. The head
+// that survives still says what the name came from, and the hash keeps two names that
+// share it apart. It is a function of the name alone, so every node renders the same
+// object to the same identifier and a reapply is the same text.
+func fold(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	tag := hex.EncodeToString(sum[:])[:identifierHashLen]
+	return id[:identifierMaxLen-len(tag)-1] + "/" + tag
 }

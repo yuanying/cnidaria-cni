@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -163,13 +164,12 @@ func TestIdentifier(t *testing.T) {
 
 func TestIdentifierRejectsWhatNFTCannotRead(t *testing.T) {
 	cases := map[string][]string{
-		"no parts":               nil,
-		"empty part":             {"default", ""},
-		"space":                  {"default", "web app"},
-		"slash":                  {"default", "a/b"},
-		"non-ascii":              {"default", "ウェブ"},
-		"quote":                  {"default", `a"b`},
-		"longer than nft allows": {strings.Repeat("a", 63), strings.Repeat("b", 253)},
+		"no parts":   nil,
+		"empty part": {"default", ""},
+		"space":      {"default", "web app"},
+		"slash":      {"default", "a/b"},
+		"non-ascii":  {"default", "ウェブ"},
+		"quote":      {"default", `a"b`},
 	}
 	for name, parts := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -177,5 +177,59 @@ func TestIdentifierRejectsWhatNFTCannotRead(t *testing.T) {
 				t.Errorf("Identifier accepted %q as %q", parts, got)
 			}
 		})
+	}
+}
+
+// A namespace and a name can be 63 and 253 bytes, so a name longer than nft accepts is
+// reachable without anybody doing anything odd. It is folded onto a hash of itself
+// rather than refused, since refusing it would stop the node's whole table being
+// updated (ADR 0003).
+func TestALongIdentifierIsFoldedOntoAHashOfItself(t *testing.T) {
+	long := []string{strings.Repeat("a", 63), strings.Repeat("b", 253), "v4"}
+	got, err := Identifier("port_", long...)
+	if err != nil {
+		t.Fatalf("Identifier: %v", err)
+	}
+	if len(got) != identifierMaxLen {
+		t.Errorf("the folded name is %d bytes, want %d: %q", len(got), identifierMaxLen, got)
+	}
+	// What nft's lexer reads back as one identifier.
+	if !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_./-]*$`).MatchString(got) {
+		t.Errorf("the folded name is not one nft can read: %q", got)
+	}
+	if !strings.HasPrefix(got, "port_"+strings.Repeat("a", 63)+"/") {
+		t.Errorf("the folded name no longer says where it came from: %q", got)
+	}
+	// The same name folds the same way on every node, and two names that share the
+	// head they keep are still told apart.
+	again, err := Identifier("port_", long...)
+	if err != nil || again != got {
+		t.Errorf("Identifier is not a function of its input: %q then %q (%v)", got, again, err)
+	}
+	other := append(append([]string{}, long[:2]...), "v6")
+	sibling, err := Identifier("port_", other...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sibling == got {
+		t.Errorf("two names folded onto one: %q", got)
+	}
+}
+
+// nft refuses a comment longer than 128 bytes, and with it the whole file. A
+// namespace and a name together go well past that, so what is handed to nft is cut.
+func TestALongCommentIsClipped(t *testing.T) {
+	rule := Rule{Verdict: "accept", Comment: "default/" + strings.Repeat("n", 253)}
+	got := rule.String()
+	comment := got[strings.Index(got, `comment "`)+len(`comment "`) : len(got)-1]
+	if len(comment) != commentMaxLen {
+		t.Errorf("the comment nft is handed is %d bytes, want %d: %q", len(comment), commentMaxLen, comment)
+	}
+	if !strings.HasPrefix(comment, "default/nnn") || !strings.HasSuffix(comment, "...") {
+		t.Errorf("the clipped comment neither says where it came from nor that it was cut: %q", comment)
+	}
+	short := Rule{Verdict: "accept", Comment: "default/web"}
+	if !strings.HasSuffix(short.String(), `comment "default/web"`) {
+		t.Errorf("a comment that fits was changed: %q", short.String())
 	}
 }

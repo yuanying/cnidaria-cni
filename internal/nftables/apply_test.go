@@ -98,3 +98,28 @@ func TestApplyFailureIsReportedAndNotRemembered(t *testing.T) {
 		t.Errorf("the text that failed was not retried (changed=%v, runs=%d)", changed, len(r.calls))
 	}
 }
+
+// Forget is how the reconciler asks for the table to go back on even though nothing
+// about it changed, which is what puts it back when it was removed behind the daemon's
+// back.
+func TestForgetMakesTheNextApplyRunNFT(t *testing.T) {
+	r := &fakeRunner{}
+	a := NewApplier(r)
+	ctx := context.Background()
+	for range 2 {
+		if _, err := a.Apply(ctx, textA); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(r.calls) != 1 {
+		t.Fatalf("nft was run %d times for one text, want 1", len(r.calls))
+	}
+	a.Forget()
+	changed, err := a.Apply(ctx, textA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || len(r.calls) != 2 {
+		t.Errorf("the same text was not reapplied after Forget (changed=%v, runs=%d)", changed, len(r.calls))
+	}
+}
