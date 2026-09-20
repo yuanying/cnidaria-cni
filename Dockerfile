@@ -14,7 +14,9 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/cnidaria ./cmd/cnidaria
 
-FROM debian:trixie-slim AS plugins
+# Fetching the plugins runs nothing of the target architecture, only curl and tar, so
+# this stage stays on the build platform and the tarball is chosen by TARGETARCH.
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS plugins
 ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 RUN apt-get update \
