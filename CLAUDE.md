@@ -64,7 +64,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `internal/conflist` | このノード用の CNI conflist を描画し（純粋関数、golden テスト）、ノードに原子的に書き出す |
 | `internal/routes` | 他ノードの PodCIDR への host-gw 経路を family ごとに保つ |
 | `internal/netpol` | NetworkPolicy v1 の意味論を chain / set のモデルに変換する |
-| `internal/nodepol` | NodePolicy と、消せない安全ルールを chain のモデルに変換する |
+| `internal/nodepol` | NodePolicy を chain のモデルに変換し、mode に応じた verdict を置く（消せない安全ルールは `internal/nftables` が描画する） |
 | `internal/nftables` | モデルを nft テキストに描画し、`nft -f` で適用する。netns 1 つと nft だけで済む tag `netns` のテストもここに置く |
 | `internal/controller` | controller-runtime の reconciler。経路用と ruleset 用の 2 つ |
 | `internal/sysctl` | 起動時の kernel 設定検査（`br_netfilter`、forwarding） |
