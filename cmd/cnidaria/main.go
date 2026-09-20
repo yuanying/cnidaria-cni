@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/yuanying/cnidaria-cni/internal/controller"
+	"github.com/yuanying/cnidaria-cni/internal/nftables"
 	"github.com/yuanying/cnidaria-cni/internal/routes"
 	"github.com/yuanying/cnidaria-cni/internal/sysctl"
 )
@@ -59,7 +62,12 @@ func run() error {
 		return fmt.Errorf("kubeconfig: %w", err)
 	}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Cache:                  cache.Options{DefaultTransform: cache.TransformStripManagedFields()},
+		Cache: cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
+			// Every node holds every pod: a policy peer may name one anywhere
+			// (ADR 0007), so a pod is cut down to what the renderer reads.
+			ByObject: map[client.Object]cache.ByObject{&corev1.Pod{}: {Transform: controller.StripPod}},
+		},
 		Metrics:                metricsserver.Options{BindAddress: *metricsAddr},
 		HealthProbeBindAddress: *healthAddr,
 	})
@@ -93,7 +101,15 @@ func run() error {
 	if err := r.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("routes reconciler: %w", err)
 	}
-	// The ruleset reconciler (ADR 0003, 0004) is registered here once it exists.
+	ruleset := &controller.Ruleset{
+		Reader:    mgr.GetCache(),
+		NodeName:  *nodeName,
+		SafePorts: nftables.DefaultSafePorts,
+		Applier:   nftables.NewApplier(nftables.NFT{}),
+	}
+	if err := ruleset.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("ruleset reconciler: %w", err)
+	}
 
 	return mgr.Start(ctrl.SetupSignalHandler())
 }
