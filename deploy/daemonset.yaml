@@ -1,0 +1,119 @@
+# One daemon per node, in the host's network namespace, looking after that node only:
+# it writes the CNI conflist, keeps the host-gw routes, and applies the nftables table
+# (ADR 0001, ADR 0003, ADR 0006).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cnidaria
+  labels:
+    app.kubernetes.io/name: cnidaria
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cnidaria
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cnidaria
+    spec:
+      hostNetwork: true
+      # A node cannot become Ready before its CNI runs, so the pod has to be scheduled
+      # onto a node the scheduler is otherwise holding back. The DaemonSet controller
+      # adds the not-ready and network-unavailable tolerations itself; they are written
+      # out here so that what the pod depends on is visible in one place.
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+        - key: node.kubernetes.io/network-unavailable
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-node-critical
+      nodeSelector:
+        kubernetes.io/os: linux
+      serviceAccountName: cnidaria
+      initContainers:
+        # cnidaria has no CNI binary of its own; the reference plugins it names in the
+        # conflist come out of this image (ADR 0001). Only the three the conflist uses
+        # are copied, and each goes to a temporary name first: a rename replaces a
+        # plugin that is running, where writing over it in place would fail. Whatever
+        # else the node has under /opt/cni/bin, flannel's plugin included, is left.
+        - name: install-cni-plugins
+          image: ghcr.io/yuanying/cnidaria-cni:dev
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              for p in bridge host-local portmap; do
+                cp -f "/opt/cni/bin/$p" "/host/opt/cni/bin/.$p.tmp"
+                chmod 0755 "/host/opt/cni/bin/.$p.tmp"
+                mv -f "/host/opt/cni/bin/.$p.tmp" "/host/opt/cni/bin/$p"
+              done
+          securityContext:
+            privileged: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: cni-bin
+              mountPath: /host/opt/cni/bin
+      containers:
+        - name: cnidaria
+          image: ghcr.io/yuanying/cnidaria-cni:dev
+          # The flags default to what a node needs; only the node's own name has to be
+          # told to it.
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: false
+            # Writing routes through netlink and the table through nft is all the
+            # daemon does to the kernel. It never loads a module: a missing
+            # br_netfilter is a refusal to start, not something to fix (ADR 0002).
+            capabilities:
+              drop: [ALL]
+              add: [NET_ADMIN]
+            readOnlyRootFilesystem: true
+          # The probes bind to the loopback address only, so the host has to be named:
+          # a hostNetwork pod's default probe address is the node's own IP.
+          livenessProbe:
+            httpGet:
+              host: 127.0.0.1
+              port: 19080
+              path: /healthz
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              host: 127.0.0.1
+              port: 19080
+              path: /readyz
+            periodSeconds: 10
+          # Sized for a control-plane node with 4GB of memory. The cache holds every
+          # pod in the cluster, stripped to what the renderer reads, so memory grows
+          # with the cluster and not with the node. No CPU limit: throttling the
+          # daemon delays the rules, and it is idle between changes anyway.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: cni-conf
+              mountPath: /etc/cni/net.d
+      volumes:
+        # The conflist the daemon writes for this node. /opt/cni/bin is the init
+        # container's and is not mounted into the daemon, which never reads it.
+        - name: cni-conf
+          hostPath:
+            path: /etc/cni/net.d
+            type: DirectoryOrCreate
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+            type: DirectoryOrCreate
