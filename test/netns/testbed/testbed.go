@@ -96,7 +96,8 @@ func (s *Segment) AddNode(t testing.TB, spec NodeSpec) *Node {
 			n.Exec(t, "ip", "addr", "add", p.String(), "dev", NodeUplink)
 		}
 	}
-	// The same settings a real node has and the daemon insists on (ADR 0002).
+	// The settings a real node has once the daemon runs: br_netfilter from the
+	// node's provisioning, forwarding turned on by the daemon (ADR 0002).
 	n.Exec(t, "sysctl", "-q", "-w",
 		"net.ipv4.ip_forward=1",
 		"net.ipv6.conf.all.forwarding=1",
