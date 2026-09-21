@@ -28,12 +28,17 @@ it.
   safe rules a policy cannot remove. A policy is permissive by default: what it would
   drop is logged and counted until `Enforce` is chosen.
 - Source-NATs pod traffic that leaves the cluster's pod CIDRs.
+- Keeps pod traffic flowing when iptables' `FORWARD` policy is `DROP`, as a container
+  engine or a host firewall may set it, with a chain of its own that accepts traffic
+  from and to the cluster's pod CIDRs and a jump to it at the head of `FORWARD`.
 
 ## What it does not do
 
 - **Replace kube-proxy.** Service load balancing stays where it is, in whichever mode
   kube-proxy runs; cnidaria's table sits beside kube-proxy's and touches nothing in it,
-  and the ruleset is never flushed.
+  and the ruleset is never flushed. The one thing it writes outside its own table is
+  the jump in iptables' `FORWARD` and the chain it leads to; the policy of `FORWARD` and
+  every other rule stay as they are (ADR 0003).
 - **Overlay networking.** Nodes must reach each other directly on one segment. There
   is no VXLAN, no tunnel, no BGP.
 - **Its own CNI binary or IPAM.** The reference plugins do the per-pod work; cnidaria
@@ -53,9 +58,10 @@ it.
 | Every node with an InternalIP of each family in use | A route's next hop is the peer's InternalIP of the same family. A missing family means no routes for that family, logged as a warning (ADR 0006) |
 | All nodes on one L2 segment | Next hops have to be on-link |
 | kube-proxy, in either mode | Services are its job, not cnidaria's. Nothing here depends on kube-proxy's tables or chains, only on DNAT happening before the forward hook, which both the iptables and the nftables mode do (ADR 0003) |
+| Nothing for iptables' `FORWARD` policy: `DROP` is fine | The daemon accepts pod traffic in a chain of its own, through whichever iptables backend, nft or legacy, holds kube-proxy's `KUBE-` chains; a family without them follows the other, and with none anywhere it is nft. The choice and its reason are logged at start-up (ADR 0003) |
 
-The nodes need nothing installed: the image carries the daemon, `nft` and the
-reference plugins.
+The nodes need nothing installed: the image carries the daemon, `nft`, `iptables` and
+the reference plugins.
 
 ## Install
 

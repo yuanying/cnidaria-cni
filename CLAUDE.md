@@ -33,7 +33,9 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 - **`br_netfilter` を前提にする。** `bridge-nf-call-iptables` / `ip6tables` が 1 でなければ
   デーモンは起動を拒否する（ADR 0002）
 - **nftables のテーブルは `inet cnidaria` の 1 つ。** `nft -f` でテーブル単位に不可分に置き換え、
-  ruleset 全体を flush しない。kube-proxy のテーブルには触らない（ADR 0003）
+  ruleset 全体を flush しない。kube-proxy のテーブルには触らない。唯一の例外は iptables の
+  `FORWARD` 先頭に置く自分のチェイン `CNIDARIA-FWD` への jump で、policy が `DROP` でも
+  Pod のトラフィックを通すためのもの。policy や他のルールは触らない（ADR 0003）
 - **NodeNetworkPolicy CRD は cluster-scoped。** ノードを締め出さない安全ルールはポリシーで消せず、
   既定は permissive（drop せずログと counter で見せる）で、`Enforce` は明示的に選ぶ（ADR 0004）
 - **IPAM は `host-local`。** ranges は `node.spec.podCIDRs` から書く（ADR 0005）
@@ -48,7 +50,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 - **簡潔に、人間が読みやすく書く。アーキテクチャも人間が理解しやすい形を優先する。**
   抽象化・汎用化・間接層は、いま必要な分だけにする。将来のために先回りして層を作らない
 - 責務ごとにパッケージを分ける。構成表は下記。ドメインのパッケージ（`conflist`、`routes`、
-  `netpol`、`nodepol`、`nftables`）は Kubernetes クライアントに依存せず、クラスター無しで
+  `netpol`、`nodepol`、`nftables`、`iptables`）は Kubernetes クライアントに依存せず、クラスター無しで
   テストできる形を保つ
 - Go 製の開発ツール（golangci-lint、controller-gen）は `go.mod` の `tool` ディレクティブで
   管理し、`go tool <name>` で呼ぶ。`go install` でのグローバル導入やダウンロードスクリプトは使わない
@@ -66,6 +68,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `internal/netpol` | NetworkPolicy v1 の意味論を chain / set のモデルに変換する |
 | `internal/nodepol` | NodeNetworkPolicy を chain のモデルに変換し、mode に応じた verdict を置く（消せない安全ルールは `internal/nftables` が描画する） |
 | `internal/nftables` | モデルを nft テキストに描画し、`nft -f` で適用する。netns 1 つと nft だけで済む tag `netns` のテストもここに置く |
+| `internal/iptables` | iptables の `FORWARD` 先頭の jump と自分のチェイン `CNIDARIA-FWD` を保ち、policy が `DROP` でも Pod のトラフィックを通す。backend（nft / legacy）は kube-proxy の `KUBE-` チェインで選ぶ |
 | `internal/controller` | controller-runtime の reconciler。経路用と ruleset 用の 2 つ |
 | `internal/sysctl` | 起動時の kernel 設定検査（`br_netfilter`、forwarding） |
 | `test/netns` | build tag `netns` の統合テスト。netns で「ノード」を組んで外から検証する |
