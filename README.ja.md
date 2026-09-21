@@ -20,7 +20,8 @@ English version: [README.md](README.md)
   family ごとにアドレスを 1 つ受け取る（デュアルスタックなら 2 つ、シングルスタックなら
   1 つ）。hairpin と hostPort はこれまでどおり効く
 - 他のすべてのノードの PodCIDR への経路を family ごとに保つ。ネクストホップはそのノードの
-  InternalIP
+  InternalIP。IPv6 の InternalIP を持たないノードは自分の global な IPv6 アドレスを
+  annotation に公開し、相手はそれを通って経路を入れる
 - NetworkPolicy v1 を 1 つの nftables テーブル `inet cnidaria` に描画する
 - cluster-scoped の `NodeNetworkPolicy` を受け取り、ノード自身の `input` / `output` に適用する。
   ポリシーで消せない安全ルールを持つ。既定は permissive で、drop されるはずのものをログに出して
@@ -54,7 +55,7 @@ English version: [README.md](README.md)
 | IP forwarding については不要。デーモンが `net.ipv4.ip_forward` と `net.ipv6.conf.all.forwarding` を 1 にする | ノードが自分の bridge とセグメントの間をルーティングする。デーモンは起動時に forwarding を有効にしてログに残し、設定を書けない場合にだけ起動を拒否する（ADR 0002） |
 | IPv6 の default 経路をルーター広告から得るインターフェースに `accept_ra=2`、または静的な default 経路 | forwarding が有効だと、`accept_ra=1` はルーター広告を無視し、default 経路が失効する。cnidaria は `accept_ra` に触らない（ADR 0002） |
 | kube-controller-manager に `--allocate-node-cidrs` とクラスター CIDR | ノードの範囲の出どころは `node.spec.podCIDRs` だけ。デュアルスタックなら family ごとに 1 つ |
-| 各ノードが、使う family それぞれの InternalIP を持つ | 経路のネクストホップは同じ family の相手ノードの InternalIP。片方の family が無ければその family の経路は入らず、警告が出る（ADR 0006） |
+| 各ノードが、使う family それぞれの InternalIP を持つ。IPv6 については、IPv4 の InternalIP を持つインターフェース上の global な IPv6 アドレスで代えられる | 経路のネクストホップは同じ family の相手ノードの InternalIP。IPv6 の InternalIP が無ければ、相手が annotation `cnidaria.unstable.cloud/node-ipv6` に公開したアドレス。どちらも無い family の経路は入らず、警告が出る（ADR 0006） |
 | 全ノードが同じ L2 セグメント上にある | ネクストホップは on-link でなければならない |
 | kube-proxy（モードは問わない） | Service は kube-proxy の仕事であって cnidaria の仕事ではない。ここにあるものは kube-proxy のテーブル名やチェイン名に依存せず、DNAT が forward hook より前で起きることにだけ依存する。これは iptables モードでも nftables モードでも変わらない（ADR 0003） |
 | iptables の `FORWARD` の policy については不要。`DROP` でもよい | デーモンが自分のチェインで Pod のトラフィックを accept する。iptables の backend（nft か legacy）は kube-proxy の `KUBE-` チェインを持っているほうを使う。それが無い family はもう一方に合わせ、どこにも無ければ nft を使う。選択と理由は起動時にログに出る（ADR 0003） |

@@ -1,6 +1,7 @@
 # What the daemon is allowed to read and write. It watches the objects it renders and
-# writes nothing back except NodeNetworkPolicy status, so every rule here is read-only apart
-# from that one (ADR 0004, ADR 0007).
+# writes nothing back except NodeNetworkPolicy status and one annotation on its own
+# Node, so every rule here is read-only apart from those two (ADR 0004, ADR 0006,
+# ADR 0007).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -16,10 +17,13 @@ metadata:
     app.kubernetes.io/name: cnidaria
 rules:
   # Nodes carry the podCIDRs the conflist and the routes are built from, and the
-  # InternalIP that is a route's next hop (ADR 0005, ADR 0006).
+  # InternalIP that is a route's next hop (ADR 0005, ADR 0006). A node without an
+  # IPv6 InternalIP patches its global IPv6 address into an annotation on its own
+  # Node for its peers to route through; RBAC cannot narrow that to the node's own
+  # object, since every copy of the daemon shares this role.
   - apiGroups: [""]
     resources: [nodes]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   # A NetworkPolicy peer may name a pod or a namespace anywhere in the cluster, so
   # every node reads all of them.
   - apiGroups: [""]

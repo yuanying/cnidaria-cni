@@ -123,7 +123,7 @@ func run() error {
 	}
 	defer kernel.Close()
 	r := &controller.Routes{
-		Reader:   mgr.GetCache(),
+		Client:   mgr.GetClient(),
 		NodeName: *nodeName,
 		Kernel:   kernel,
 		Forward:  forward,

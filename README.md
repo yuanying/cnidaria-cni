@@ -22,7 +22,8 @@ it.
   gets an address from every family the node has a CIDR for — two on a dual-stack
   cluster, one on a single-stack one; hairpin and hostPort keep working.
 - Keeps a route to every other node's pod CIDRs, per address family, with that node's
-  InternalIP as the next hop.
+  InternalIP as the next hop. A node with no IPv6 InternalIP publishes its global IPv6
+  address in an annotation, and its peers route through that.
 - Renders NetworkPolicy v1 into one nftables table, `inet cnidaria`.
 - Accepts a cluster-scoped `NodeNetworkPolicy` for the node's own `input` and `output`, with
   safe rules a policy cannot remove. A policy is permissive by default: what it would
@@ -55,7 +56,7 @@ it.
 | Nothing for IP forwarding: the daemon sets `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` to 1 | The node routes between its bridge and the segment. The daemon turns forwarding on at start-up and logs it, and refuses to run only if it cannot write the setting (ADR 0002) |
 | `accept_ra=2`, or a static default route, on an interface that takes its IPv6 default route from router advertisements | With forwarding on, `accept_ra=1` ignores router advertisements and the default route expires. cnidaria does not touch `accept_ra` (ADR 0002) |
 | kube-controller-manager with `--allocate-node-cidrs` and the cluster CIDRs | `node.spec.podCIDRs` is the only source of a node's ranges. For dual stack, one CIDR per family |
-| Every node with an InternalIP of each family in use | A route's next hop is the peer's InternalIP of the same family. A missing family means no routes for that family, logged as a warning (ADR 0006) |
+| Every node with an InternalIP of each family in use. For IPv6, a global IPv6 address on the interface of the IPv4 InternalIP does instead | A route's next hop is the peer's InternalIP of the same family; for IPv6 without one, the address the peer publishes in the `cnidaria.unstable.cloud/node-ipv6` annotation. A family with neither means no routes for it, logged as a warning (ADR 0006) |
 | All nodes on one L2 segment | Next hops have to be on-link |
 | kube-proxy, in either mode | Services are its job, not cnidaria's. Nothing here depends on kube-proxy's tables or chains, only on DNAT happening before the forward hook, which both the iptables and the nftables mode do (ADR 0003) |
 | Nothing for iptables' `FORWARD` policy: `DROP` is fine | The daemon accepts pod traffic in a chain of its own, through whichever iptables backend, nft or legacy, holds kube-proxy's `KUBE-` chains; a family without them follows the other, and with none anywhere it is nft. The choice and its reason are logged at start-up (ADR 0003) |

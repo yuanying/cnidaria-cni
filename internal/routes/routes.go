@@ -1,6 +1,7 @@
 // Package routes keeps the host routing table pointing at the other nodes' pod
 // CIDRs, one route per peer node and address family, with that node's InternalIP as
-// the next hop (flannel host-gw style, ADR 0006). It owns only the routes carrying
+// the next hop, or for IPv6 the address the node annotated when it has no IPv6
+// InternalIP (flannel host-gw style, ADR 0006). It owns only the routes carrying
 // its protocol marker and never touches anyone else's.
 //
 // Compute is the decision and depends on nothing but its arguments; Kernel is the
@@ -22,6 +23,10 @@ type Node struct {
 	// InternalIPs are the InternalIP entries of node.status.addresses, in the order
 	// kubelet reports them.
 	InternalIPs []netip.Addr
+	// AnnotatedIPv6 is the IPv6 address the node published in its annotation, the
+	// next hop for its IPv6 pod CIDR when it has no IPv6 InternalIP. Zero when
+	// there is none.
+	AnnotatedIPv6 netip.Addr
 }
 
 // Route is one entry this node should have: a peer's pod CIDR reached through that
@@ -37,8 +42,9 @@ func (r Route) String() string {
 	return fmt.Sprintf("%s via %s (node %s)", r.Dst, r.Via, r.Node)
 }
 
-// Missing records a peer that has a pod CIDR of one family but no InternalIP of that
-// family. No route is installed for it; the operator is told instead (ADR 0006).
+// Missing records a peer that has a pod CIDR of one family but no address of that
+// family to route it through. No route is installed for it; the operator is told
+// instead (ADR 0006).
 type Missing struct {
 	Node    string
 	Family  string // "IPv4" or "IPv6"
@@ -46,8 +52,12 @@ type Missing struct {
 }
 
 func (m Missing) String() string {
-	return fmt.Sprintf("node %s has the %s pod CIDR %s but no %s InternalIP; no %s route installed for it",
-		m.Node, m.Family, m.PodCIDR, m.Family, m.Family)
+	how := "InternalIP"
+	if m.Family == "IPv6" {
+		how = "InternalIP or annotated address"
+	}
+	return fmt.Sprintf("node %s has the %s pod CIDR %s but no %s %s; no %s route installed for it",
+		m.Node, m.Family, m.PodCIDR, m.Family, how, m.Family)
 }
 
 // Compute returns the routes the node named self should have, given every Node in the
@@ -64,7 +74,7 @@ func Compute(self string, nodes []Node) ([]Route, []Missing) {
 			continue
 		}
 		for _, cidr := range n.PodCIDRs {
-			via, ok := firstOfFamily(n.InternalIPs, cidr.Addr().Is6())
+			via, ok := nextHop(n, cidr.Addr().Is6())
 			if !ok {
 				missing = append(missing, Missing{Node: n.Name, Family: family(cidr.Addr()), PodCIDR: cidr})
 				continue
@@ -82,6 +92,18 @@ func byNodeThenPrefix(nodeA string, prefixA netip.Prefix, nodeB string, prefixB 
 		return c
 	}
 	return strings.Compare(prefixA.String(), prefixB.String())
+}
+
+// nextHop is the peer's InternalIP of the family, or for IPv6 the address it
+// annotated when it has no IPv6 InternalIP.
+func nextHop(n Node, v6 bool) (netip.Addr, bool) {
+	if via, ok := firstOfFamily(n.InternalIPs, v6); ok {
+		return via, true
+	}
+	if v6 && n.AnnotatedIPv6.Is6() {
+		return n.AnnotatedIPv6, true
+	}
+	return netip.Addr{}, false
 }
 
 // firstOfFamily picks the first listed address of the wanted family: with several

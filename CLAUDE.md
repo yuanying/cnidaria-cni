@@ -39,8 +39,9 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 - **NodeNetworkPolicy CRD は cluster-scoped。** ノードを締め出さない安全ルールはポリシーで消せず、
   既定は permissive（drop せずログと counter で見せる）で、`Enforce` は明示的に選ぶ（ADR 0004）
 - **IPAM は `host-local`。** ranges は `node.spec.podCIDRs` から書く（ADR 0005）
-- **経路は family ごと。** 相手ノードの InternalIP をネクストホップにし、片方の family が
-  無ければその family の経路は入れず警告する（ADR 0006）
+- **経路は family ごと。** 相手ノードの InternalIP をネクストホップにする。IPv6 の InternalIP が
+  無いノードは自分の global IPv6 を annotation `cnidaria.unstable.cloud/node-ipv6` に公開し、
+  相手はそれを使う。どちらも無い family の経路は入れず警告する（ADR 0006）
 - **API の watch は controller-runtime に統一。** core 型も CRD も Manager のキャッシュで読み、
   kubebuilder の雛形は使わない。CRD の manifest と DeepCopy は controller-gen で生成する（ADR 0007）
 - **kube-proxy は置き換えない。** Service の負荷分散は kube-proxy のまま
