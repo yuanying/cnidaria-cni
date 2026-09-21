@@ -1,6 +1,6 @@
 # One daemon per node, in the host's network namespace, looking after that node only:
-# it writes the CNI conflist, keeps the host-gw routes, and applies the nftables table
-# (ADR 0001, ADR 0003, ADR 0006).
+# it writes the CNI conflist, keeps the host-gw routes and the iptables forward chain,
+# and applies the nftables table (ADR 0001, ADR 0003, ADR 0006).
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -74,14 +74,19 @@ spec:
                   fieldPath: spec.nodeName
           securityContext:
             privileged: false
-            # Writing routes through netlink, the table through nft, and IP
-            # forwarding through /proc/sys/net is all the daemon does to the kernel.
-            # It never loads a module: a missing br_netfilter is a refusal to
-            # start, not something to fix (ADR 0002). Only /proc/sys/net is
-            # writable, not all of /proc/sys, and the container stays unprivileged.
+            # Writing routes through netlink, the table through nft, the forward
+            # chain through iptables, and IP forwarding through /proc/sys/net is all
+            # the daemon does to the kernel. It loads no module on purpose: a missing
+            # br_netfilter is a refusal to start, not something to fix (ADR 0002).
+            # Reading the legacy iptables backend may still have the kernel load
+            # its table modules on demand, as any iptables command does.
+            # Only /proc/sys/net is writable, not all of /proc/sys, and the
+            # container stays unprivileged. NET_RAW is for the legacy iptables
+            # backend, which talks to the kernel through a raw socket; nft needs
+            # only NET_ADMIN (ADR 0003).
             capabilities:
               drop: [ALL]
-              add: [NET_ADMIN]
+              add: [NET_ADMIN, NET_RAW]
             readOnlyRootFilesystem: true
           # The probes bind to the loopback address only, so the host has to be named:
           # a hostNetwork pod's default probe address is the node's own IP.
@@ -113,6 +118,8 @@ spec:
               mountPath: /etc/cni/net.d
             - name: proc-sys-net
               mountPath: /host/proc/sys/net
+            - name: xtables-lock
+              mountPath: /run/xtables.lock
       volumes:
         # The conflist the daemon writes for this node. /opt/cni/bin is the init
         # container's and is not mounted into the daemon, which never reads it.
@@ -130,3 +137,11 @@ spec:
           hostPath:
             path: /proc/sys/net
             type: Directory
+        # The lock the legacy iptables backend takes around every change, shared
+        # with kube-proxy and anything else on the node that writes iptables. The
+        # root filesystem is read-only, so without it the legacy backend cannot
+        # write at all (ADR 0003).
+        - name: xtables-lock
+          hostPath:
+            path: /run/xtables.lock
+            type: FileOrCreate
