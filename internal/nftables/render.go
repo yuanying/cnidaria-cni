@@ -192,9 +192,10 @@ func prefixSet(name, typ string, elements []string, comment string) Set {
 	return Set{Name: name, Type: typ, Flags: []string{"interval"}, Elements: elements, Comment: comment}
 }
 
-// podChain is the forward-hook chain for one direction of NetworkPolicy: replies pass,
-// then a pod in the isolated set for that direction is sent to the dispatch chain.
-// Pods in no set are not evaluated at all, which is the "all allowed" default.
+// podChain is the forward-hook chain for one direction of NetworkPolicy: replies and
+// neighbour discovery pass, then a pod in the isolated set for that direction is sent
+// to the dispatch chain. Pods in no set are not evaluated at all, which is the "all
+// allowed" default.
 func podChain(name, priority, addr, setV4, setV6, dispatch, comment string) Chain {
 	return Chain{
 		Name:    name,
@@ -202,6 +203,12 @@ func podChain(name, priority, addr, setV4, setV6, dispatch, comment string) Chai
 		Comment: comment,
 		Rules: []Rule{
 			{Match: "ct state established,related", Verdict: "accept", Comment: "replies follow the connection"},
+			// Between two pods on one node the solicitation and the advertisement are
+			// bridged, and br_netfilter hands them to this hook. They resolve an
+			// address and carry no traffic of their own; dropping them cuts an
+			// isolated pod off from even the peers its policy allows (ADR 0003).
+			{Match: "icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert }", Verdict: "accept",
+				Comment: "neighbour discovery is not policy traffic"},
 			{Match: "ip " + addr + " @" + setV4, Verdict: "jump " + dispatch, Comment: "isolated for " + name},
 			{Match: "ip6 " + addr + " @" + setV6, Verdict: "jump " + dispatch, Comment: "isolated for " + name},
 		},

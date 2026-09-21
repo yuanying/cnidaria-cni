@@ -220,3 +220,11 @@ func (e *nsExec) ExecPlugin(ctx context.Context, pluginPath string, stdinData []
 	}
 	return stdout.Bytes(), nil
 }
+
+// FlushNeighbours empties the pod's neighbour cache, so that the next packet to
+// another pod starts with address resolution.
+func (p *Pod) FlushNeighbours(t testing.TB) {
+	t.Helper()
+	p.Exec(t, "ip", "neigh", "flush", "all")
+	p.Exec(t, "ip", "-6", "neigh", "flush", "all")
+}

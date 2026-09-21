@@ -74,7 +74,8 @@ neither dropped it.
 The pattern in each of `egress` and `ingress`:
 
 1. `ct state established,related accept`. NetworkPolicy governs who may open a
-   connection; replies follow.
+   connection; replies follow. IPv6 neighbour solicitations and advertisements are
+   accepted next to it, for the reason given below.
 2. A jump into a dispatch chain for packets whose pod address is in the *isolated* set
    for that direction (one set per family). A pod is isolated for a direction when at
    least one NetworkPolicy with that `policyType` selects it. Unselected pods match no
@@ -125,6 +126,19 @@ kubelet probes and `exec` sessions originate on the node and reach a local pod t
 its own pods, and a cluster whose health checks are subject to user policy is a cluster
 that goes unhealthy for reasons that read as policy bugs. The `output` chain carries
 NodeNetworkPolicy only.
+
+### Neighbour discovery is not pod policy
+
+Two pods on one node reach each other across the bridge, and `br_netfilter` hands every
+bridged IPv6 packet to the `forward` hook (ADR 0002), neighbour solicitations and
+advertisements included. Those carry no traffic of their own: they resolve the address
+the traffic will then go to. Were they subject to policy, a pod isolated for egress
+would have its solicitation dropped by the dispatch chain, its neighbour entry for the
+peer would go to FAILED, and it could not reach even the pods its policy allows on the
+same node. The same holds for an advertisement answering towards a pod isolated for
+ingress. So both pod chains accept these two ICMPv6 types at their head, alongside the
+established rule, before any pod is looked up. IPv4 never met this: ARP is not IP and
+does not reach the IP hooks.
 
 ### Masquerade
 
@@ -229,3 +243,10 @@ Two alternatives were rejected. Setting the policy of `FORWARD` to `ACCEPT` woul
 a choice the node's owner, or another program, made on purpose. Requiring the node to
 be provisioned so that pod traffic is accepted would leave the pod network one
 container-engine restart away from going down, which is the failure this is for.
+
+**2026-09-21, found on a running cluster.** A pod isolated for egress could not reach
+an allowed pod on its own node over IPv6 once its neighbour entry expired: the
+neighbour solicitation went through the `forward` hook and was dropped as policy
+traffic. The pod chains now accept neighbour solicitations and advertisements ahead of
+the isolated-set lookup, and the section on neighbour discovery gives the reason. This
+adds to the chain pattern and reverses nothing.

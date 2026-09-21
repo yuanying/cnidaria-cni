@@ -56,6 +56,7 @@ table inet cnidaria {
 	chain egress {
 		type filter hook forward priority filter; policy accept;
 		ct state established,related counter accept comment "replies follow the connection"
+		icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } counter accept comment "neighbour discovery is not policy traffic"
 		ip saddr @isolated_egress_v4 counter jump egress_dispatch comment "isolated for egress"
 		ip6 saddr @isolated_egress_v6 counter jump egress_dispatch comment "isolated for egress"
 	}
@@ -69,6 +70,7 @@ table inet cnidaria {
 	chain ingress {
 		type filter hook forward priority filter + 1; policy accept;
 		ct state established,related counter accept comment "replies follow the connection"
+		icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } counter accept comment "neighbour discovery is not policy traffic"
 		ip daddr @isolated_ingress_v4 counter jump ingress_dispatch comment "isolated for ingress"
 		ip6 daddr @isolated_ingress_v6 counter jump ingress_dispatch comment "isolated for ingress"
 	}
