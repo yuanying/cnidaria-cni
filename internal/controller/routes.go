@@ -57,10 +57,9 @@ type Routes struct {
 type Conflist struct {
 	// Path is where the list is written, in the runtime's CNI configuration directory.
 	Path string
-	// Name is the network name; Bridge the Linux bridge the pods attach to.
+	// Name is the network name, which also names host-local's lease directory
+	// (ADR 0009); Bridge the Linux bridge the pods attach to.
 	Name, Bridge string
-	// IPAMName, when set, names host-local's lease directory (ADR 0009).
-	IPAMName string
 	// MTU is set on the bridge and every veth. Zero means read it from the interface
 	// that holds one of this node's InternalIPs, which is the uplink pod traffic
 	// leaves through (ADR 0001); an explicit value is for a node whose uplink is
@@ -133,7 +132,6 @@ func (r *Routes) writeConflist(self *routes.Node, log logr.Logger) error {
 		Bridge:   r.Conflist.Bridge,
 		MTU:      mtu,
 		PodCIDRs: self.PodCIDRs,
-		IPAMName: r.Conflist.IPAMName,
 	})
 	if err != nil {
 		return err

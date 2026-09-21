@@ -1,8 +1,9 @@
 # ADR 0005: Address allocation is host-local's, fed from `node.spec.podCIDRs`
 
 - Status: Accepted (2026-09-19)
-- Amended by: ADR 0009 (2026-09-19) — the store directory follows the ipam name when
-  one is set, so that a node migrating from another CNI can share its leases
+- Amended by: ADR 0009 (2026-09-19, corrected 2026-09-21) — the network name, and with
+  it the store directory, is a setting (`--network-name`), so that a node migrating
+  from another CNI can share its leases
 
 ## Context
 
@@ -30,8 +31,9 @@ allocator inside a plugin of our own (same), and the reference `host-local` plug
   node, one file per allocated address holding the container ID. It persists across
   daemon restarts and node reboots. The DaemonSet mounts nothing for it; the plugin runs
   on the host, not in the pod.
-- The network name in the conflist is fixed (`cnidaria`), so the store directory is
-  stable and a conflist rewrite does not orphan leases.
+- The network name in the conflist is `cnidaria` unless the daemon is told otherwise
+  (ADR 0009). It does not change while a node runs, so the store directory is stable
+  and a conflist rewrite does not orphan leases.
 
 ## Consequences
 

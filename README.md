@@ -177,8 +177,8 @@ The daemon takes its node's name and otherwise defaults to what a node needs.
 |---|---|---|
 | `--node-name` | `$NODE_NAME` | The node this copy looks after. The DaemonSet fills it from the downward API |
 | `--conflist` | `/etc/cni/net.d/10-cnidaria.conflist` | Where the conflist is written |
+| `--network-name` | `cnidaria` | The network name in the conflist. `host-local` keeps its leases under `/var/lib/cni/networks/<name>`, so set it to another CNI's network name to take over the addresses that CNI has already handed out (ADR 0009) |
 | `--mtu` | `0` | MTU for the bridge and the pod interfaces. 0 reads it from the interface holding the node's InternalIP |
-| `--ipam-store-name` | the network name | The directory `host-local` keeps its leases in, under `/var/lib/cni/networks`. Set it to another CNI's network name to take over the addresses that CNI has already handed out (ADR 0009) |
 | `--health-addr` | `127.0.0.1:19080` | `/healthz` and `/readyz`. Loopback only, which is why the DaemonSet's probes name `127.0.0.1` |
 | `--metrics-addr` | `0` | Prometheus metrics, off by default |
 

@@ -38,14 +38,14 @@ func main() {
 
 func run() error {
 	var (
-		nodeName      = flag.String("node-name", os.Getenv("NODE_NAME"), "Name of the Node this daemon runs on. Defaults to $NODE_NAME.")
-		conflistPath  = flag.String("conflist", "/etc/cni/net.d/10-cnidaria.conflist", "Where to write the CNI configuration list.")
-		mtu           = flag.Int("mtu", 0, "MTU for the bridge and the pod interfaces. 0 reads it from the interface holding the node's InternalIP.")
-		ipamStoreName = flag.String("ipam-store-name", "", "Name of host-local's lease directory under /var/lib/cni/networks. Empty uses the network name. Set to the previous CNI's network name when migrating (ADR 0009).")
-		healthAddr    = flag.String("health-addr", "127.0.0.1:19080", "Address for the /healthz and /readyz probes.")
-		metricsAddr   = flag.String("metrics-addr", "0", "Address for Prometheus metrics. 0 disables them.")
-		procSys       = flag.String("proc-sys", sysctl.ProcSys, "Where the kernel settings are read and written. In a container, a writable mount of the host's /proc/sys/net under a /proc/sys-shaped path (ADR 0002).")
-		zapOpts       zap.Options
+		nodeName     = flag.String("node-name", os.Getenv("NODE_NAME"), "Name of the Node this daemon runs on. Defaults to $NODE_NAME.")
+		conflistPath = flag.String("conflist", "/etc/cni/net.d/10-cnidaria.conflist", "Where to write the CNI configuration list.")
+		mtu          = flag.Int("mtu", 0, "MTU for the bridge and the pod interfaces. 0 reads it from the interface holding the node's InternalIP.")
+		networkName  = flag.String("network-name", "cnidaria", "Network name in the conflist. host-local keeps its leases under /var/lib/cni/networks/<name>, so set it to the previous CNI's network name when migrating (ADR 0009).")
+		healthAddr   = flag.String("health-addr", "127.0.0.1:19080", "Address for the /healthz and /readyz probes.")
+		metricsAddr  = flag.String("metrics-addr", "0", "Address for Prometheus metrics. 0 disables them.")
+		procSys      = flag.String("proc-sys", sysctl.ProcSys, "Where the kernel settings are read and written. In a container, a writable mount of the host's /proc/sys/net under a /proc/sys-shaped path (ADR 0002).")
+		zapOpts      zap.Options
 	)
 	ctrl.RegisterFlags(flag.CommandLine)
 	zapOpts.BindFlags(flag.CommandLine)
@@ -128,11 +128,10 @@ func run() error {
 		Kernel:   kernel,
 		Forward:  forward,
 		Conflist: controller.Conflist{
-			Path:     *conflistPath,
-			Name:     "cnidaria",
-			Bridge:   "cni0",
-			IPAMName: *ipamStoreName,
-			MTU:      *mtu,
+			Path:   *conflistPath,
+			Name:   *networkName,
+			Bridge: "cni0",
+			MTU:    *mtu,
 		},
 	}
 	if err := r.SetupWithManager(mgr); err != nil {

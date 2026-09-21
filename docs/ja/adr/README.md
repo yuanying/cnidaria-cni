@@ -14,4 +14,4 @@
 | [0006](0006-next-hop-per-address-family.md) | ネクストホップは family ごと | 同じ family の InternalIP。欠けた family は迂回せず警告する。経路に所有者の印を付ける |
 | [0007](0007-controller-runtime-for-everything-the-daemon-watches.md) | デーモンが watch するものはすべて controller-runtime | Manager 1 つ、reconciler 2 つ、CRD は controller-gen、kubebuilder の雛形は使わない |
 | [0008](0008-tests-split-by-privilege.md) | テストは必要な権限で分ける | ユニットテストはツールチェインだけで通る。netns テストは build tag の裏に置き特権コンテナで回す |
-| [0009](0009-migration-from-flannel-without-restarting-pods.md) | flannel から Pod を再起動せずに移行する | 同じ `cni0`、経路は宛先ごとに置換、ipam のストアは名前で共有（`--ipam-store-name`）、flannel のプラグインはその Pod が消えるまで残す、他人のファイルは消さない |
+| [0009](0009-migration-from-flannel-without-restarting-pods.md) | flannel から Pod を再起動せずに移行する | 同じ `cni0`、経路は宛先ごとに置換、ipam のストアはネットワーク名で共有（`--network-name`）、flannel のプラグインはその Pod が消えるまで残す、他人のファイルは消さない |

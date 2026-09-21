@@ -1,7 +1,7 @@
 # ADR 0009: Migrating from flannel host-gw in place, without restarting pods
 
-- Status: Accepted (2026-09-19)
-- Amends: ADR 0005 (the ipam store name is no longer tied to the network name)
+- Status: Accepted (2026-09-19), amended (2026-09-21)
+- Amends: ADR 0005 (the network name, which names the ipam store, is a setting)
 
 ## Context
 
@@ -50,21 +50,20 @@ left the cluster before the takeover is not replaced, because nothing computes i
 is a leftover for the runbook to name, since cnidaria does not delete routes it did
 not mark.
 
-### The address store is shared by name
+### The address store is shared through the network name
 
-`host-local` keeps its leases under `/var/lib/cni/networks/<name>`. The name is the
-network name unless the ipam block carries its own `name`, in which case that is used
-instead. flannel's conflist is named `cbr0`, so the leases of every running pod are
-under `cbr0`. If cnidaria allocated from a store of its own, the first new pod would
-be handed an address that a running pod already holds.
+`host-local` keeps its leases under `/var/lib/cni/networks/<network name>`. The ipam
+block has a `name` field of its own, but host-local overwrites it with the network name
+before it opens the store, so the network name alone decides the directory. flannel's
+conflist is named `cbr0`, so the leases of every running pod are under `cbr0`. If
+cnidaria allocated from a store of its own, the first new pod would be handed an
+address that a running pod already holds.
 
-cnidaria's conflist therefore can name the ipam store separately from the network:
-the daemon's `--ipam-store-name` flag puts that name in the ipam block, and a node
-migrating from flannel is started with `cbr0`. The default is empty, which leaves
-host-local on the network name, as ADR 0005 described. The network name itself stays
-`cnidaria`, since the runtime keys its own bookkeeping by it.
+cnidaria's network name is therefore a setting: the daemon's `--network-name` flag,
+`cnidaria` by default, and a node migrating from flannel is started with `cbr0`. The
+bridge and everything else in the conflist are the same whatever the name.
 
-A store named after a previous CNI is a permanent setting on such a cluster, not a
+A network named after a previous CNI is a permanent setting on such a cluster, not a
 transitional one: the leases written after the takeover live in the same directory,
 and renaming it later would orphan them. This is the only visible trace the migration
 leaves.
@@ -108,12 +107,22 @@ DaemonSet.
 - The migration is a rollout, not a window. Its steps, their order and how to verify
   each one are a runbook and not this record; the runbook is written by the deployment
   unit against the decisions here.
-- ADR 0005's statement that the store directory follows the fixed network name is
-  amended: the store follows the ipam name when one is set. The rest of ADR 0005 stands.
-- The daemon's manifests must be able to carry `--ipam-store-name=cbr0` on a migrated
+- ADR 0005's statement that the network name is fixed is amended: it is `cnidaria`
+  unless the daemon is told otherwise. The rest of ADR 0005 stands.
+- The daemon's manifests must be able to carry `--network-name=cbr0` on a migrated
   cluster and omit it on a fresh one. A cluster that starts on cnidaria never sets it.
-- The netns testbed (ADR 0008) names the ipam store per node for its own reasons, and
-  in doing so exercises the same field on the real plugin.
+- The netns testbed (ADR 0008) names the network per node for its own reasons, and in
+  doing so exercises the same store naming on the real plugin.
 - A future CNI that replaces cnidaria has the same three things to preserve: the
-  bridge name, the ipam store name, and the previous plugin binary until its pods are
+  bridge name, the network name, and the previous plugin binary until its pods are
   gone. This record is the checklist.
+
+## Amendments
+
+**2026-09-21, when the migration was tried on a running cluster.** The first version
+said the ipam block's own `name` chose host-local's store, and added an
+`--ipam-store-name` flag that put the previous CNI's name there while the network kept
+the name `cnidaria`. host-local does not honour that field: it replaces it with the
+network name, so the flag changed nothing and the store stayed a new one. The flag is
+gone. The network name is now the setting (`--network-name`), which is what
+host-local actually reads, and the section on the address store says so.

@@ -78,16 +78,16 @@ func (n *Node) Kernel(t testing.TB) *routes.Kernel {
 }
 
 // Conflist renders this node's list exactly as the daemon would, except that the
-// ipam store is named per node and run: every node's plugin shares one filesystem
-// here, and host-local must not hand the same lease to two nodes.
+// network is named per node and run: every node's plugin shares one filesystem here,
+// host-local keeps its leases under the network name, and it must not hand the same
+// lease to two nodes.
 func (n *Node) Conflist(t testing.TB) []byte {
 	t.Helper()
 	data, err := conflist.Render(conflist.Params{
-		Name:     "cnidaria",
+		Name:     n.NS,
 		Bridge:   PodBridge,
 		MTU:      1500,
 		PodCIDRs: n.PodCIDRs,
-		IPAMName: n.NS,
 	})
 	if err != nil {
 		t.Fatal(err)

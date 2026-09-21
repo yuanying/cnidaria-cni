@@ -117,11 +117,11 @@ func TestReconcileAppliesRoutesAndWritesTheConflist(t *testing.T) {
 	}
 }
 
-// The ipam store name reaches the conflist, so that a node migrating from another
-// CNI shares that CNI's leases (ADR 0009).
-func TestReconcileWritesTheIPAMNameIntoTheConflist(t *testing.T) {
+// The network name reaches the conflist, so that a node migrating from another CNI
+// shares that CNI's leases: host-local keys its store by the network name (ADR 0009).
+func TestReconcileWritesTheNetworkNameIntoTheConflist(t *testing.T) {
 	r, path := newReconciler(t, &recorder{}, node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"))
-	r.Conflist.IPAMName = "cbr0"
+	r.Conflist.Name = "cbr0"
 	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestReconcileWritesTheIPAMNameIntoTheConflist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), `"name": "cbr0"`) {
-		t.Errorf("conflist does not carry the ipam name:\n%s", got)
+		t.Errorf("conflist does not carry the network name:\n%s", got)
 	}
 }
 

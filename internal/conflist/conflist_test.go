@@ -41,15 +41,14 @@ func TestRenderMatchesGolden(t *testing.T) {
 			},
 		},
 		{
-			// Migrating from flannel: host-local keeps its leases under the ipam name
-			// when there is one, so naming flannel's store shares the allocations
-			// with the pods that already exist (ADR 0009).
-			name: "ipam-store-name",
+			// host-local keeps its leases under the network name, so a node taking
+			// over from another CNI names its network after that one's to share the
+			// allocations with the pods that already exist (ADR 0009).
+			name: "network-name",
 			params: Params{
-				Name:     "cnidaria",
-				Bridge:   "cni0",
-				MTU:      1500,
-				IPAMName: "cbr0",
+				Name:   "cbr0",
+				Bridge: "cni0",
+				MTU:    1500,
 				PodCIDRs: []netip.Prefix{
 					netip.MustParsePrefix("192.0.2.0/24"),
 					netip.MustParsePrefix("2001:db8:1::/64"),

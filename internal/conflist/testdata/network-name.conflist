@@ -1,6 +1,6 @@
 {
   "cniVersion": "1.0.0",
-  "name": "cnidaria",
+  "name": "cbr0",
   "plugins": [
     {
       "type": "bridge",
@@ -10,7 +10,6 @@
       "mtu": 1500,
       "ipam": {
         "type": "host-local",
-        "name": "cbr0",
         "ranges": [
           [
             {

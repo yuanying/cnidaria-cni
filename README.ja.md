@@ -171,8 +171,8 @@ NetworkPolicy v1 は丸ごと描画する。`podSelector`、`namespaceSelector`�
 |---|---|---|
 | `--node-name` | `$NODE_NAME` | このコピーが受け持つノード。DaemonSet が downward API から埋める |
 | `--conflist` | `/etc/cni/net.d/10-cnidaria.conflist` | conflist の書き出し先 |
+| `--network-name` | `cnidaria` | conflist のネットワーク名。`host-local` はリースを `/var/lib/cni/networks/<名前>` に置くので、別の CNI が既に配ったアドレスの割り当て状態を引き継ぐときに、その CNI のネットワーク名を指定する（ADR 0009） |
 | `--mtu` | `0` | bridge と Pod のインターフェースの MTU。0 ならノードの InternalIP を持つインターフェースから読む |
-| `--ipam-store-name` | ネットワーク名 | `host-local` がリースを置くディレクトリ名（`/var/lib/cni/networks` 以下）。別の CNI が既に配ったアドレスの割り当て状態を引き継ぐときに、その CNI のネットワーク名を指定する（ADR 0009） |
 | `--health-addr` | `127.0.0.1:19080` | `/healthz` と `/readyz`。loopback にしか bind しないので、DaemonSet の probe は `127.0.0.1` を指定している |
 | `--metrics-addr` | `0` | Prometheus メトリクス。既定は off |
 
