@@ -21,6 +21,7 @@ RUN apt-get update \
         conntrack \
         curl \
         iproute2 \
+        iptables \
         iputils-ping \
         kmod \
         nftables \
