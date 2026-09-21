@@ -25,6 +25,12 @@ spec:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
+        # The legacy name of the control-plane taint. Clusters set up before it was
+        # renamed still put this one on their control-plane nodes, which need a CNI
+        # all the same.
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
         - key: node.kubernetes.io/not-ready
           operator: Exists
           effect: NoExecute
