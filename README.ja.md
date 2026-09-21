@@ -36,15 +36,18 @@ English version: [README.md](README.md)
   BGP も無い
 - **自前の CNI バイナリや IPAM。** Pod ごとの作業はリファレンスプラグインが行う。cnidaria は
   ノード常駐のデーモンと conflist であり、Pod の起動時に cnidaria のコードは 1 行も動かない
-- **ノードの設定の修正。** データプレーンが前提とする kernel 設定が欠けていれば、デーモンは
-  それを有効にするのではなく起動を拒否する
+- **カーネルモジュールの読み込み。** `br_netfilter` が無い、あるいはその sysctl が 1 で
+  なければ、デーモンはそれを有効にするのではなく起動を拒否する。デーモンが自分で有効に
+  する kernel 設定は IP forwarding だけで、Pod のためにルーティングする CNI が一般に
+  そうするのと同じである
 
 ## 前提
 
 | 前提 | 理由 |
 |---|---|
 | `br_netfilter` が読み込まれ、`net.bridge.bridge-nf-call-iptables` と `bridge-nf-call-ip6tables` が 1 | 同一ノードに留まる Pod 間のトラフィックは bridge で L2 スイッチされ、これが無いと IP の filter hook を通らない。デーモンは起動時に確認し、無ければ起動を拒否する（ADR 0002） |
-| `net.ipv4.ip_forward` と `net.ipv6.conf.all.forwarding` が 1 | ノードが自分の bridge とセグメントの間をルーティングする。上の設定と同じく起動時に検査され、満たさなければ同じように起動を拒否する |
+| IP forwarding については不要。デーモンが `net.ipv4.ip_forward` と `net.ipv6.conf.all.forwarding` を 1 にする | ノードが自分の bridge とセグメントの間をルーティングする。デーモンは起動時に forwarding を有効にしてログに残し、設定を書けない場合にだけ起動を拒否する（ADR 0002） |
+| IPv6 の default 経路をルーター広告から得るインターフェースに `accept_ra=2`、または静的な default 経路 | forwarding が有効だと、`accept_ra=1` はルーター広告を無視し、default 経路が失効する。cnidaria は `accept_ra` に触らない（ADR 0002） |
 | kube-controller-manager に `--allocate-node-cidrs` とクラスター CIDR | ノードの範囲の出どころは `node.spec.podCIDRs` だけ。デュアルスタックなら family ごとに 1 つ |
 | 各ノードが、使う family それぞれの InternalIP を持つ | 経路のネクストホップは同じ family の相手ノードの InternalIP。片方の family が無ければその family の経路は入らず、警告が出る（ADR 0006） |
 | 全ノードが同じ L2 セグメント上にある | ネクストホップは on-link でなければならない |
@@ -64,9 +67,10 @@ cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 配るイメージのタグは `deploy/kustomization.yaml` の `images:` で、overlay から上書きできる。
 イメージは `ghcr.io/yuanying/cnidaria-cni` に置かれる。
 
-DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。init
-container が `bridge` / `host-local` / `portmap` を `/opt/cni/bin` にコピーし、ノードにある
-他のプラグインには手を触れない。
+DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。デーモンが
+forwarding を有効にできるよう、ホストの `/proc/sys/net` を書き込み可能でマウントする。
+`/proc/sys` のそれ以外は読み取り専用のまま。init container が `bridge` / `host-local` /
+`portmap` を `/opt/cni/bin` にコピーし、ノードにある他のプラグインには手を触れない。
 
 ノードが動いている状態とは、conflist が `/etc/cni/net.d/10-cnidaria.conflist` にあり、
 `ip route show proto 200` に他ノードの PodCIDR が並び、テーブル `inet cnidaria` が

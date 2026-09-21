@@ -41,6 +41,7 @@ func run() error {
 		ipamStoreName = flag.String("ipam-store-name", "", "Name of host-local's lease directory under /var/lib/cni/networks. Empty uses the network name. Set to the previous CNI's network name when migrating (ADR 0009).")
 		healthAddr    = flag.String("health-addr", "127.0.0.1:19080", "Address for the /healthz and /readyz probes.")
 		metricsAddr   = flag.String("metrics-addr", "0", "Address for Prometheus metrics. 0 disables them.")
+		procSys       = flag.String("proc-sys", sysctl.ProcSys, "Where the kernel settings are read and written. In a container, a writable mount of the host's /proc/sys/net under a /proc/sys-shaped path (ADR 0002).")
 		zapOpts       zap.Options
 	)
 	ctrl.RegisterFlags(flag.CommandLine)
@@ -53,8 +54,18 @@ func run() error {
 	}
 	// Refusing to start is the point (ADR 0002): a warning would scroll away and
 	// the policy would silently miss half the traffic.
-	if err := sysctl.Check(sysctl.ProcSys); err != nil {
+	if err := sysctl.Check(*procSys); err != nil {
 		return fmt.Errorf("kernel settings the data plane needs are not in place:\n%w", err)
+	}
+	// Forwarding is ours to turn on, as the CNI this replaces did at run time: a
+	// node whose provisioning never persisted it comes back from a reboot with it
+	// off (ADR 0002).
+	changed, err := sysctl.EnsureForwarding(*procSys)
+	for _, name := range changed {
+		ctrl.Log.Info("Turned on forwarding", "sysctl", name)
+	}
+	if err != nil {
+		return fmt.Errorf("could not turn on forwarding:\n%w", err)
 	}
 
 	// One manager, no leader election (each node acts for itself), probes and

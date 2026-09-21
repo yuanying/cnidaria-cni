@@ -62,8 +62,11 @@ spec:
       containers:
         - name: cnidaria
           image: ghcr.io/yuanying/cnidaria-cni:dev
-          # The flags default to what a node needs; only the node's own name has to be
-          # told to it.
+          # The flags default to what a node needs, except where the kernel settings
+          # are: the container's own /proc/sys is read-only, so the daemon is pointed
+          # at the host's /proc/sys/net mounted writable below (ADR 0002).
+          args:
+            - --proc-sys=/host/proc/sys
           env:
             - name: NODE_NAME
               valueFrom:
@@ -71,9 +74,11 @@ spec:
                   fieldPath: spec.nodeName
           securityContext:
             privileged: false
-            # Writing routes through netlink and the table through nft is all the
-            # daemon does to the kernel. It never loads a module: a missing
-            # br_netfilter is a refusal to start, not something to fix (ADR 0002).
+            # Writing routes through netlink, the table through nft, and IP
+            # forwarding through /proc/sys/net is all the daemon does to the kernel.
+            # It never loads a module: a missing br_netfilter is a refusal to
+            # start, not something to fix (ADR 0002). Only /proc/sys/net is
+            # writable, not all of /proc/sys, and the container stays unprivileged.
             capabilities:
               drop: [ALL]
               add: [NET_ADMIN]
@@ -106,6 +111,8 @@ spec:
           volumeMounts:
             - name: cni-conf
               mountPath: /etc/cni/net.d
+            - name: proc-sys-net
+              mountPath: /host/proc/sys/net
       volumes:
         # The conflist the daemon writes for this node. /opt/cni/bin is the init
         # container's and is not mounted into the daemon, which never reads it.
@@ -117,3 +124,9 @@ spec:
           hostPath:
             path: /opt/cni/bin
             type: DirectoryOrCreate
+        # The pod shares the host's network namespace, so this is the node's own
+        # forwarding the daemon turns on.
+        - name: proc-sys-net
+          hostPath:
+            path: /proc/sys/net
+            type: Directory

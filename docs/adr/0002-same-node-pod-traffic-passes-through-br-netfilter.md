@@ -1,6 +1,7 @@
 # ADR 0002: Same-node pod traffic is filtered through br_netfilter, which the cluster already requires
 
-- Status: Accepted (2026-09-19)
+- Status: Accepted (2026-09-19), amended (2026-09-21): the daemon turns on IP forwarding
+  instead of requiring it.
 
 ## Context
 
@@ -45,23 +46,28 @@ Two other places could see same-node traffic without br_netfilter and were consi
 
 ## Decision
 
-**cnidaria assumes br_netfilter with both sysctls set to 1, and refuses to start when
-they are not.**
+**cnidaria requires br_netfilter with both sysctls set to 1, and refuses to start when
+they are not. IP forwarding it turns on itself.**
 
 - The daemon reads `net.bridge.bridge-nf-call-iptables` and
   `net.bridge.bridge-nf-call-ip6tables` at start-up. A value other than `1`, or the files
   being absent because the module is not loaded, is a fatal error whose message names the
   sysctl and the value it wants.
-- The same check covers `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding`, which a
-  node that routes for its pods needs in any case.
-- The daemon does not load modules or set sysctls itself. That belongs to node
+- The daemon also reads `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding`, which a
+  node that routes for its pods needs in any case, and writes `1` to whichever is not
+  `1`, logging each one it changed. A setting it cannot write, because the file is
+  read-only to it or it lacks the privilege, is a fatal error naming the sysctl and the
+  file it tried to write.
+- The daemon does not load modules or set the br_netfilter sysctls. They belong to node
   provisioning, where the cluster already sets them for kube-proxy; a daemon that quietly
-  changes kernel-wide settings is harder to reason about than one that says what it
-  needs.
+  changes a setting some other component also depends on is harder to reason about than
+  one that says what it needs. Forwarding is different in kind: it is the routing the
+  CNI does, and the CNI turning it on is what nodes already expect (see Amendments).
 
-Refusing to start, rather than warning, is deliberate. A warning under a stream of other
-log lines is how the policy silently does not apply to half the traffic. A daemon that
-does not come up is noticed, and it is noticed before any policy was ever trusted.
+Refusing to start over br_netfilter, rather than warning, is deliberate. A warning under
+a stream of other log lines is how the policy silently does not apply to half the
+traffic. A daemon that does not come up is noticed, and it is noticed before any policy
+was ever trusted.
 
 With br_netfilter in place, every packet between two pods — on one node or on two —
 passes through the host's `forward` hook exactly once per node it crosses, and conntrack
@@ -78,3 +84,44 @@ sees both directions. That is what ADR 0003's chain layout relies on.
 - If a future kube-proxy stops needing br_netfilter, cnidaria still does. The start-up
   check is cnidaria's own for that reason and does not defer to anything kube-proxy
   reports.
+- The container runtime mounts a container's `/proc/sys` read-only, a pod on the host's
+  network included. The DaemonSet mounts the host's `/proc/sys/net` writable at
+  `/host/proc/sys/net` and points the daemon at it with a flag; outside a container the
+  flag's default is `/proc/sys`. How this was chosen is under Amendments.
+- With forwarding at `1` the kernel treats the node as a router, and an interface with
+  `accept_ra` at `1` stops accepting router advertisements; only `accept_ra` at `2`
+  accepts them while forwarding. A node that takes its IPv6 default route from router
+  advertisements therefore needs `accept_ra=2` on that interface, or a static default
+  route, from its provisioning, or the route expires after cnidaria starts. cnidaria does
+  not touch `accept_ra`: how a node accepts routes from its network is the node's own
+  decision, and a CNI overriding it would surprise whoever made it.
+
+## Amendments
+
+**2026-09-21, after running on a cluster migrated from another CNI.** The first version
+of this record required the two forwarding sysctls as well and left them to provisioning,
+with the same refusal to start. A CNI that routes for its pods commonly turns forwarding
+on at run time; flannel does, for IPv6 when it is enabled. Nodes provisioned beside such
+a CNI need not persist the setting, and nothing on the node records that it was the CNI,
+not provisioning, that turned it on. After the CNI is replaced, everything keeps working
+until the node reboots: forwarding comes back off, the daemon refuses to start, and the
+node has no pod network. Turning forwarding on is what the replaced CNI did, so cnidaria
+doing the same means a migration does not change what a node needs. br_netfilter stays a
+requirement: it is a kernel module, kube-proxy depends on it too, and provisioning sets it
+for that reason.
+
+Writing the setting from inside a pod needed a way past the read-only `/proc/sys`. Three
+ways were considered.
+
+- **The host's `/proc/sys/net` mounted writable at another path** (chosen). The files under
+  `/proc/sys/net` answer for the network namespace of the process that opens them, so
+  for a pod on the host's network they are the node's. The container stays unprivileged
+  with the `NET_ADMIN` it already has, only the network settings become writable, not all
+  of `/proc/sys`, and the daemon sets forwarding every time it starts, so a restart of
+  the daemon alone puts it back. Tried with a container runtime before it was chosen: the
+  default `/proc/sys` refuses the write and the mounted path accepts it.
+- **A privileged init container running `sysctl -w`.** It leaves the daemon's container
+  alone, but it is a privileged container where none was needed, and an init container
+  does not run again when only the daemon's container restarts.
+- **A privileged daemon container**, as flannel runs. The simplest, and the widest
+  privilege for a single write.
