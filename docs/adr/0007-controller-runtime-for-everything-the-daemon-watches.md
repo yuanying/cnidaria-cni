@@ -6,7 +6,7 @@
 
 The daemon reacts to five kinds of object: Nodes (routes, masquerade set, the conflist),
 Pods and Namespaces (which addresses a selector names), NetworkPolicies, and its own
-NodePolicy CRD. All of them feed one output per node — the routing table and one
+NodeNetworkPolicy CRD. All of them feed one output per node — the routing table and one
 nftables table — so what is wanted is a cache of those objects and a signal that
 something changed, not per-object bookkeeping.
 
@@ -39,7 +39,7 @@ alike — and none of the kubebuilder scaffolding.**
   | Reconciler | Triggered by | Does |
   |---|---|---|
   | routes | Node add / update / delete | Recomputes the full route set (ADR 0006); on this node's own object, writes the conflist once (ADR 0001) |
-  | ruleset | Pod, Namespace, NetworkPolicy, NodePolicy, Node | Renders and applies `inet cnidaria` (ADR 0003, 0004) |
+  | ruleset | Pod, Namespace, NetworkPolicy, NodeNetworkPolicy, Node | Renders and applies `inet cnidaria` (ADR 0003, 0004) |
 
   Every event for the ruleset reconciler maps to one fixed request key, so the
   work queue collapses a burst of pod events into one reconcile. That is the debounce
@@ -61,8 +61,8 @@ alike — and none of the kubebuilder scaffolding.**
   them.
 - controller-runtime's version pins the `k8s.io` module versions. They are chosen to be
   compatible with the cluster version in use and moved together.
-- Status updates on NodePolicy (ADR 0004) go through the manager's client with the
+- Status updates on NodeNetworkPolicy (ADR 0004) go through the manager's client with the
   status subresource, the same client as every read.
-- If a later need for per-object reconciliation appears — say, a per-NodePolicy
+- If a later need for per-object reconciliation appears — say, a per-NodeNetworkPolicy
   condition that needs its own retry — it is a third small reconciler, not a change to
   the two here.

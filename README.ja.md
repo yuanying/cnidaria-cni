@@ -22,7 +22,7 @@ English version: [README.md](README.md)
 - 他のすべてのノードの PodCIDR への経路を family ごとに保つ。ネクストホップはそのノードの
   InternalIP
 - NetworkPolicy v1 を 1 つの nftables テーブル `inet cnidaria` に描画する
-- cluster-scoped の `NodePolicy` を受け取り、ノード自身の `input` / `output` に適用する。
+- cluster-scoped の `NodeNetworkPolicy` を受け取り、ノード自身の `input` / `output` に適用する。
   ポリシーで消せない安全ルールを持つ。既定は permissive で、drop されるはずのものをログに出して
   数え、`Enforce` を選ぶまで落とさない
 - クラスターの PodCIDR の外へ出る Pod のトラフィックを送信元 NAT する
@@ -59,7 +59,7 @@ English version: [README.md](README.md)
 kubectl apply -k deploy
 ```
 
-入るのは 5 つ。`NodePolicy` の CRD、ClusterRole、ClusterRoleBinding（この 3 つは
+入るのは 5 つ。`NodeNetworkPolicy` の CRD、ClusterRole、ClusterRoleBinding（この 3 つは
 cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 配るイメージのタグは `deploy/kustomization.yaml` の `images:` で、overlay から上書きできる。
 イメージは `ghcr.io/yuanying/cnidaria-cni` に置かれる。
@@ -72,9 +72,9 @@ container が `bridge` / `host-local` / `portmap` を `/opt/cni/bin` にコピ�
 `ip route show proto 200` に他ノードの PodCIDR が並び、テーブル `inet cnidaria` が
 存在すること。
 
-## NodePolicy: ノード自身のトラフィック
+## NodeNetworkPolicy: ノード自身のトラフィック
 
-NetworkPolicy は Pod にしか効かない。`NodePolicy` は cluster-scoped で、ラベルでノードを
+NetworkPolicy は Pod にしか効かない。`NodeNetworkPolicy` は cluster-scoped で、ラベルでノードを
 選び、そのノードの `input` / `output` チェインに描画される（ADR 0004）。
 
 ノードを締め出さないための仕掛けが 2 つある。
@@ -90,15 +90,15 @@ kubelet が自ノードの Pod に probe を打ち `exec` できる状態を保�
 `Enforce` なら落としていたものを、代わりにログに出して数える。したがってポリシーを実運用に
 入れる手順はこうなる。
 
-1. そのまま適用する。`mode` の無い `NodePolicy` は `Permissive` である
+1. そのまま適用する。`mode` の無い `NodeNetworkPolicy` は `Permissive` である
 2. 何が落ちるはずだったかを、そのノードのトラフィックの周期に見合うだけ眺める。夜間に
    バックアップが走るノードなら丸 1 日
 
    ```sh
-   journalctl -k | grep cnidaria-nodepolicy   # 送信元・宛先・プロトコル・ポート
+   journalctl -k | grep cnidaria-nodenetworkpolicy   # 送信元・宛先・プロトコル・ポート
    nft list chain inet cnidaria input         # counter。こちらは rate limit されない
-   kubectl get nodepolicies                   # 各ポリシーが要求している mode
-   kubectl get nodepolicy NAME -o yaml        # status.nodes[]: 各ノードで効いた mode
+   kubectl get nodenetworkpolicies                   # 各ポリシーが要求している mode
+   kubectl get nodenetworkpolicy NAME -o yaml        # status.nodes[]: 各ノードで効いた mode
    ```
 
    `kubectl get` が出す列は `spec.mode`、つまりポリシーが要求している mode である。
@@ -115,7 +115,7 @@ kubelet が自ノードの Pod に probe を打ち `exec` できる状態を保�
 
 ```yaml
 apiVersion: cnidaria.unstable.cloud/v1alpha1
-kind: NodePolicy
+kind: NodeNetworkPolicy
 metadata:
   name: workers
 spec:
@@ -148,10 +148,10 @@ NetworkPolicy v1 は丸ごと描画する。`podSelector`、`namespaceSelector`�
 
 | 対象外 | 理由 |
 |---|---|
-| `hostNetwork` の Pod | ノードのアドレスを持つ。これを指すポリシーはノードを指すことになる。このトラフィックを司るのは `NodePolicy` |
+| `hostNetwork` の Pod | ノードのアドレスを持つ。これを指すポリシーはノードを指すことになる。このトラフィックを司るのは `NodeNetworkPolicy` |
 | ノードから自ノードの Pod への通信 | ノード自身の `output` から出ていき forward を通らないので、Pod の ingress ポリシーはこれを見ない。kubelet の probe と `exec` がこれに依存しており、上の安全ルールの 1 つが開けたままにする |
 | 終了した Pod | Succeeded / Failed の Pod は、誰かに消されるまで API 上でアドレスを持ち続け、そのアドレスは既に動いている別の Pod のものかもしれない。どの選択からも外す |
-| NetworkPolicy の観測モード | `Permissive` は `NodePolicy` だけのもの。Pod のポリシーは、他のどの実装とも同じく適用した瞬間から落とす |
+| NetworkPolicy の観測モード | `Permissive` は `NodeNetworkPolicy` だけのもの。Pod のポリシーは、他のどの実装とも同じく適用した瞬間から落とす |
 
 ## 設定
 

@@ -21,7 +21,7 @@ type Params struct {
 	// ClusterPodCIDRs are every node's podCIDRs, this node's included. Traffic from
 	// this node's pods to any of them stays inside the cluster and is not masqueraded.
 	ClusterPodCIDRs []netip.Prefix
-	// SafePorts are the ports the rules a NodePolicy cannot remove keep open (ADR 0004).
+	// SafePorts are the ports the rules a NodeNetworkPolicy cannot remove keep open (ADR 0004).
 	SafePorts SafePorts
 }
 
@@ -59,7 +59,7 @@ func (r PortRange) String() string {
 }
 
 // The names of the sets and chains Render declares. The NetworkPolicy renderer fills
-// the isolated sets and puts its jumps into the dispatch chains; the NodePolicy renderer
+// the isolated sets and puts its jumps into the dispatch chains; the NodeNetworkPolicy renderer
 // appends to input and output after the safe rules.
 const (
 	SetNodePodsV4        = "node_pods_v4"
@@ -247,7 +247,7 @@ func inputChain(ports SafePorts) Chain {
 	return Chain{
 		Name:    ChainInput,
 		Base:    &BaseChain{Type: "filter", Hook: "input", Priority: "filter", Policy: "accept"},
-		Comment: "NodePolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)",
+		Comment: "NodeNetworkPolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)",
 		Rules:   rules,
 	}
 }
@@ -265,7 +265,7 @@ func outputChain(ports SafePorts) Chain {
 	return Chain{
 		Name:    ChainOutput,
 		Base:    &BaseChain{Type: "filter", Hook: "output", Priority: "filter", Policy: "accept"},
-		Comment: "NodePolicy egress, behind the safe rules a policy cannot remove (ADR 0004)",
+		Comment: "NodeNetworkPolicy egress, behind the safe rules a policy cannot remove (ADR 0004)",
 		Rules:   rules,
 	}
 }

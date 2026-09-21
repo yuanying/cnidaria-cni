@@ -1,7 +1,8 @@
-# ADR 0004: NodePolicy is a cluster-scoped CRD that is permissive by default and carries rules that cannot lock a node out
+# ADR 0004: NodeNetworkPolicy is a cluster-scoped CRD that is permissive by default and carries rules that cannot lock a node out
 
 - Status: Accepted (2026-09-19). Revised the same day: permissive mode replaces the
   commit-confirmed apply that the first version of this record chose.
+- Amended (2026-09-21): the kind was renamed from NodePolicy to NodeNetworkPolicy.
 
 ## Context
 
@@ -22,7 +23,7 @@ remove, and how an operator finds out what a policy would break before it breaks
 
 ### Shape
 
-`NodePolicy`, cluster-scoped, in API group `cnidaria.unstable.cloud`, version
+`NodeNetworkPolicy`, cluster-scoped, in API group `cnidaria.unstable.cloud`, version
 `v1alpha1`. The group sits under a domain the project controls, as regied's does, and
 the name of the binary does not appear in it so that the API does not move when the
 binary is renamed.
@@ -53,7 +54,7 @@ server `6443`, kubelet `10250`, etcd `2379-2380`, SSH `22`).
 ### Safe rules that a policy cannot remove
 
 Every `input` and `output` chain opens with the rules below, before any policy is
-consulted, whether or not a NodePolicy exists. They are not a policy and no field turns
+consulted, whether or not a NodeNetworkPolicy exists. They are not a policy and no field turns
 them off.
 
 | Direction | Rule | Why |
@@ -79,19 +80,19 @@ and traffic to a load balancer address is DNATed by kube-proxy and goes through
 and if they forget, permissive mode is what shows it.
 
 Accepting these unconditionally is a deliberate coarseness for a first version: an
-operator cannot restrict SSH to a management range through a NodePolicy. Narrowing a
+operator cannot restrict SSH to a management range through a NodeNetworkPolicy. Narrowing a
 safe rule by source is a later change to this record, not a reason to start without
 them.
 
 ### Permissive by default
 
-A NodePolicy is rendered the same way in both modes: the safe rules, then the dispatch
+A NodeNetworkPolicy is rendered the same way in both modes: the safe rules, then the dispatch
 into the policy chains, then the verdict for a packet no rule accepted. Only that final
 verdict differs.
 
 | Mode | Final verdict in the dispatch chain |
 |---|---|
-| `Permissive` | `limit rate` → `log prefix "cnidaria-nodepolicy "` → `counter` → fall through to the base chain's `policy accept` |
+| `Permissive` | `limit rate` → `log prefix "cnidaria-nodenetworkpolicy "` → `counter` → fall through to the base chain's `policy accept` |
 | `Enforce` | `counter` → `drop` |
 
 In `Permissive` a packet that the policy would deny is accepted, its source, destination,
@@ -151,7 +152,7 @@ DeepCopy methods are generated from them (ADR 0007). The manifest is committed s
   the ruleset from the objects it sees, in whichever mode they declare, and applies it
   (ADR 0003). Start-up is the same as any other reconcile.
 - Ingress from pods to the node's own sockets (a pod reaching a hostNetwork service, or
-  metrics scraped from the node) is governed by NodePolicy like any other source, using
+  metrics scraped from the node) is governed by NodeNetworkPolicy like any other source, using
   the pod CIDRs in `ipBlock`. Pod selectors as node-policy peers can be added when a
   concrete need appears; leaving them out keeps the first version's peers static and
   the safe-rule reasoning simple.
@@ -167,3 +168,17 @@ DeepCopy methods are generated from them (ADR 0007). The manifest is committed s
 - The netns testbed (ADR 0008) asserts, for a selected node, that an unlisted port is
   logged and counted but reachable in `Permissive`, rejected in `Enforce`, and that
   kubelet-style and API-server-style connections survive in both.
+
+## Amendments
+
+**2026-09-21, the kind renamed to NodeNetworkPolicy.** The kind was first called
+NodePolicy, a name that does not say the policy is about the network. Other
+implementations keep the word NetworkPolicy and change what it selects: Calico's
+GlobalNetworkPolicy with HostEndpoint, Cilium's CiliumClusterwideNetworkPolicy with a
+`nodeSelector`, and Antrea's ClusterNetworkPolicy with a `nodeSelector`, a feature Antrea
+calls Node NetworkPolicy. The kind is now NodeNetworkPolicy (plural
+`nodenetworkpolicies`, short name `nnp`) so that its correspondence with the standard
+NetworkPolicy reads from the name. The API group, version, fields and semantics are
+unchanged. The log prefix followed the kind and is now `cnidaria-nodenetworkpolicy `;
+this is the one change to the interface the consequences above call stable, made while
+the API is still `v1alpha1`.

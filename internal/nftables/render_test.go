@@ -148,7 +148,7 @@ func TestIdentifier(t *testing.T) {
 	}{
 		{"policy_", []string{"default", "web"}, "policy_default/web"},
 		{"pods_", []string{"kube-system", "core.dns-1"}, "pods_kube-system/core.dns-1"},
-		{"nodepolicy_", []string{"control-plane"}, "nodepolicy_control-plane"},
+		{"nodenetworkpolicy_", []string{"control-plane"}, "nodenetworkpolicy_control-plane"},
 	}
 	for _, tc := range cases {
 		got, err := Identifier(tc.prefix, tc.parts...)

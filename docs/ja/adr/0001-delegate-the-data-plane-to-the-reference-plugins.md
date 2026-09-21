@@ -76,7 +76,7 @@ B が再び正しい形になるのは、Pod が動いている間にノード�
 | ノードがどの conflist を受け取るか | cnidaria デーモン |
 | 相手ノードの Pod CIDR への経路 | cnidaria デーモン（ADR 0006） |
 | クラスターネットワークの外へ出る Pod トラフィックの source NAT | cnidaria デーモン（ADR 0003） |
-| NetworkPolicy と NodePolicy の enforce | cnidaria デーモン（ADR 0003、0004） |
+| NetworkPolicy と NodeNetworkPolicy の enforce | cnidaria デーモン（ADR 0003、0004） |
 | Service のロードバランシング | kube-proxy。触らない |
 
 masquerade には注記が要る。flannel では `--ip-masq` フラグが、クラスターネットワークの外へ

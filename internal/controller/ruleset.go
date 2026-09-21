@@ -32,12 +32,12 @@ import (
 // whole table, which is the debounce ADR 0003 asks for.
 type Ruleset struct {
 	// Client is the manager's client: reads come from its cache, and the status of
-	// a NodePolicy is written through it to the API server.
+	// a NodeNetworkPolicy is written through it to the API server.
 	client.Client
 	// NodeName is the node this daemon runs on: its pod CIDRs are the table's, and
 	// only its own pods are enforced here (ADR 0003).
 	NodeName string
-	// SafePorts are the ports the rules a NodePolicy cannot remove keep open.
+	// SafePorts are the ports the rules a NodeNetworkPolicy cannot remove keep open.
 	SafePorts nftables.SafePorts
 	// Applier replaces the table with the rendered text; nftables.Applier on a
 	// node. It skips a text it has already applied, and Forget is how this
@@ -71,7 +71,7 @@ func (r *Ruleset) SetupWithManager(mgr ctrl.Manager) error {
 		// says, so a change to it is what the table is rendered from; a status
 		// carries no generation and is skipped here, while the cache still holds
 		// the new one for the comparison that decides the next write.
-		Watches(&v1alpha1.NodePolicy{}, one, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&v1alpha1.NodeNetworkPolicy{}, one, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 
@@ -114,7 +114,7 @@ func (r *Ruleset) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, e
 
 // render reads everything the table depends on and returns the text to apply, or ""
 // when there is nothing to apply yet or nothing that can be applied, together with
-// what this node has to say in the status of each NodePolicy.
+// what this node has to say in the status of each NodeNetworkPolicy.
 //
 // Rendering can fail on what the API server holds — a name nft cannot read, an
 // ipBlock that is not a prefix. Retrying that would fail the same way, and applying
@@ -128,7 +128,7 @@ func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, []policy
 	}
 	var params nftables.Params
 	params.SafePorts = r.SafePorts
-	// The labels of this node's own object are what a NodePolicy selects on.
+	// The labels of this node's own object are what a NodeNetworkPolicy selects on.
 	var labels map[string]string
 	for i := range nodes.Items {
 		cidrs := fromNode(&nodes.Items[i], log).PodCIDRs
@@ -183,7 +183,7 @@ func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, []policy
 		return "", nil, nil
 	}
 
-	status, err := r.addNodePolicies(ctx, ruleset, labels)
+	status, err := r.addNodeNetworkPolicies(ctx, ruleset, labels)
 	if err != nil {
 		// A policy the renderer refuses is a fault in what the API server holds,
 		// so it is reported in that policy's status and the node keeps the table
@@ -198,19 +198,19 @@ func (r *Ruleset) render(ctx context.Context, log logr.Logger) (string, []policy
 	return ruleset.String(), status, nil
 }
 
-// policyStatus is what this node has to say about one NodePolicy: the entry it should
+// policyStatus is what this node has to say about one NodeNetworkPolicy: the entry it should
 // hold in status.nodes[], or none at all when the policy does not select this node.
 type policyStatus struct {
-	policy *v1alpha1.NodePolicy
-	entry  *v1alpha1.NodePolicyNodeStatus
+	policy *v1alpha1.NodeNetworkPolicy
+	entry  *v1alpha1.NodeNetworkPolicyNodeStatus
 }
 
-// addNodePolicies renders the NodePolicies that select this node into the ruleset,
+// addNodeNetworkPolicies renders the NodeNetworkPolicies that select this node into the ruleset,
 // behind the safe rules a policy cannot remove (ADR 0004). The status that goes with
 // a refused policy is returned along with the error, so that the policy at fault is
 // the one that carries the message.
-func (r *Ruleset) addNodePolicies(ctx context.Context, ruleset *nftables.Ruleset, labels map[string]string) ([]policyStatus, error) {
-	var policies v1alpha1.NodePolicyList
+func (r *Ruleset) addNodeNetworkPolicies(ctx context.Context, ruleset *nftables.Ruleset, labels map[string]string) ([]policyStatus, error) {
+	var policies v1alpha1.NodeNetworkPolicyList
 	if err := r.List(ctx, &policies); err != nil {
 		return nil, fmt.Errorf("list node policies: %w", err)
 	}
@@ -227,7 +227,7 @@ func (r *Ruleset) addNodePolicies(ctx context.Context, ruleset *nftables.Ruleset
 			}
 			return []policyStatus{{
 				policy: &policies.Items[i],
-				entry: &v1alpha1.NodePolicyNodeStatus{
+				entry: &v1alpha1.NodeNetworkPolicyNodeStatus{
 					Name:               r.NodeName,
 					ObservedGeneration: policies.Items[i].Generation,
 					Message:            refused.Err.Error(),
@@ -240,7 +240,7 @@ func (r *Ruleset) addNodePolicies(ctx context.Context, ruleset *nftables.Ruleset
 	status := make([]policyStatus, 0, len(policies.Items))
 	for i := range policies.Items {
 		policy := &policies.Items[i]
-		entry := &v1alpha1.NodePolicyNodeStatus{
+		entry := &v1alpha1.NodeNetworkPolicyNodeStatus{
 			Name:               r.NodeName,
 			ObservedGeneration: policy.Generation,
 			Mode:               modes[policy.Name],
@@ -265,7 +265,7 @@ func (r *Ruleset) writeStatus(ctx context.Context, status []policyStatus) error 
 		policy := s.policy.DeepCopy()
 		policy.Status.Nodes = nodes
 		if err := r.Status().Update(ctx, policy); err != nil {
-			return fmt.Errorf("status of NodePolicy %s: %w", policy.Name, err)
+			return fmt.Errorf("status of NodeNetworkPolicy %s: %w", policy.Name, err)
 		}
 	}
 	return nil
@@ -274,8 +274,8 @@ func (r *Ruleset) writeStatus(ctx context.Context, status []policyStatus) error 
 // withEntry replaces this node's entry in the list, adds it, or takes it out when
 // entry is nil, and says whether that changed anything. The entries of the other
 // nodes are carried over as they are: a node speaks for itself only (ADR 0004).
-func withEntry(nodes []v1alpha1.NodePolicyNodeStatus, name string, entry *v1alpha1.NodePolicyNodeStatus) ([]v1alpha1.NodePolicyNodeStatus, bool) {
-	out := make([]v1alpha1.NodePolicyNodeStatus, 0, len(nodes)+1)
+func withEntry(nodes []v1alpha1.NodeNetworkPolicyNodeStatus, name string, entry *v1alpha1.NodeNetworkPolicyNodeStatus) ([]v1alpha1.NodeNetworkPolicyNodeStatus, bool) {
+	out := make([]v1alpha1.NodeNetworkPolicyNodeStatus, 0, len(nodes)+1)
 	found := false
 	for _, node := range nodes {
 		switch {

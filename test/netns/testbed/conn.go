@@ -36,7 +36,7 @@ func (p *Pod) Serve(t testing.TB, port uint16) {
 	serve(t, p.NS, "pod "+p.Name, port)
 }
 
-// Serve on a node listens in the node's own namespace, which is where a NodePolicy
+// Serve on a node listens in the node's own namespace, which is where a NodeNetworkPolicy
 // decides what may arrive (ADR 0004).
 func (n *Node) Serve(t testing.TB, port uint16) {
 	t.Helper()
@@ -71,7 +71,7 @@ func (p *Pod) Connect(t testing.TB, addr netip.Addr, port uint16, timeout time.D
 	return connect(t, p.NS, "pod "+p.Name, addr, port, timeout)
 }
 
-// Connect from a node is the same from the node's own namespace: the end a NodePolicy
+// Connect from a node is the same from the node's own namespace: the end a NodeNetworkPolicy
 // governs.
 func (n *Node) Connect(t testing.TB, addr netip.Addr, port uint16, timeout time.Duration) Outcome {
 	t.Helper()

@@ -31,7 +31,7 @@ const (
 	PolicyTypeEgress PolicyType = "Egress"
 )
 
-// NodePolicy governs what may reach and what may leave the node itself, which is the
+// NodeNetworkPolicy governs what may reach and what may leave the node itself, which is the
 // traffic NetworkPolicy does not describe (ADR 0004). It is cluster-scoped, selects
 // nodes by label, and drops nothing until an operator asks for Enforce.
 //
@@ -44,30 +44,30 @@ const (
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=nodepol
+// +kubebuilder:resource:scope=Cluster,shortName=nnp
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-type NodePolicy struct {
+type NodeNetworkPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodePolicySpec   `json:"spec,omitempty"`
-	Status NodePolicyStatus `json:"status,omitempty"`
+	Spec   NodeNetworkPolicySpec   `json:"spec,omitempty"`
+	Status NodeNetworkPolicyStatus `json:"status,omitempty"`
 }
 
-// NodePolicyList is a list of NodePolicy.
+// NodeNetworkPolicyList is a list of NodeNetworkPolicy.
 //
 // +kubebuilder:object:root=true
-type NodePolicyList struct {
+type NodeNetworkPolicyList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 
-	Items []NodePolicy `json:"items"`
+	Items []NodeNetworkPolicy `json:"items"`
 }
 
-// NodePolicySpec is the policy itself. Its vocabulary is NetworkPolicy's on purpose:
+// NodeNetworkPolicySpec is the policy itself. Its vocabulary is NetworkPolicy's on purpose:
 // an operator who can write one can write the other.
-type NodePolicySpec struct {
+type NodeNetworkPolicySpec struct {
 	// mode is Permissive (the default) or Enforce. A node enforces a direction only
 	// when every policy that closes that direction on it asks for Enforce, so one
 	// permissive policy keeps the node observing.
@@ -93,51 +93,51 @@ type NodePolicySpec struct {
 	// from anywhere, and one with no ports accepts on every port.
 	//
 	// +optional
-	Ingress []NodePolicyIngressRule `json:"ingress,omitempty"`
+	Ingress []NodeNetworkPolicyIngressRule `json:"ingress,omitempty"`
 
 	// egress lists what a selected node may send, with the same defaults as ingress.
 	//
 	// +optional
-	Egress []NodePolicyEgressRule `json:"egress,omitempty"`
+	Egress []NodeNetworkPolicyEgressRule `json:"egress,omitempty"`
 }
 
-// NodePolicyIngressRule allows traffic that matches one of its peers and one of its
+// NodeNetworkPolicyIngressRule allows traffic that matches one of its peers and one of its
 // ports.
-type NodePolicyIngressRule struct {
+type NodeNetworkPolicyIngressRule struct {
 	// from are the sources this rule allows. Empty allows every source.
 	//
 	// +optional
-	From []NodePolicyPeer `json:"from,omitempty"`
+	From []NodeNetworkPolicyPeer `json:"from,omitempty"`
 
 	// ports are the ports on the node this rule allows. Empty allows every port.
 	//
 	// +optional
-	Ports []NodePolicyPort `json:"ports,omitempty"`
+	Ports []NodeNetworkPolicyPort `json:"ports,omitempty"`
 }
 
-// NodePolicyEgressRule allows traffic that matches one of its peers and one of its
+// NodeNetworkPolicyEgressRule allows traffic that matches one of its peers and one of its
 // ports.
-type NodePolicyEgressRule struct {
+type NodeNetworkPolicyEgressRule struct {
 	// to are the destinations this rule allows. Empty allows every destination.
 	//
 	// +optional
-	To []NodePolicyPeer `json:"to,omitempty"`
+	To []NodeNetworkPolicyPeer `json:"to,omitempty"`
 
 	// ports are the destination ports this rule allows. Empty allows every port.
 	//
 	// +optional
-	Ports []NodePolicyPort `json:"ports,omitempty"`
+	Ports []NodeNetworkPolicyPort `json:"ports,omitempty"`
 }
 
-// NodePolicyPeer is the other end of the traffic. Pod and namespace selectors are not
+// NodeNetworkPolicyPeer is the other end of the traffic. Pod and namespace selectors are not
 // peers here: a node is addressed by the network, not by the cluster (ADR 0004). Pods
 // are reached through their CIDRs like any other address.
-type NodePolicyPeer struct {
+type NodeNetworkPolicyPeer struct {
 	// ipBlock is a CIDR, with optional exceptions inside it.
 	IPBlock *networkingv1.IPBlock `json:"ipBlock"`
 }
 
-// NodePolicyPort is one protocol and one port or range of ports. Ports are numbers
+// NodeNetworkPolicyPort is one protocol and one port or range of ports. Ports are numbers
 // here and never names: a node has no container ports for a name to refer to.
 //
 // What a range has to hold is stated to the API server as well as checked when the
@@ -146,7 +146,7 @@ type NodePolicyPeer struct {
 //
 // +kubebuilder:validation:XValidation:rule="!has(self.endPort) || has(self.port)",message="endPort needs a port"
 // +kubebuilder:validation:XValidation:rule="!has(self.endPort) || !has(self.port) || self.endPort >= self.port",message="endPort must not be below port"
-type NodePolicyPort struct {
+type NodeNetworkPolicyPort struct {
 	// protocol is TCP, UDP or SCTP. It defaults to TCP.
 	//
 	// +kubebuilder:default=TCP
@@ -171,19 +171,19 @@ type NodePolicyPort struct {
 	EndPort *int32 `json:"endPort,omitempty"`
 }
 
-// NodePolicyStatus is what the nodes report back.
-type NodePolicyStatus struct {
+// NodeNetworkPolicyStatus is what the nodes report back.
+type NodeNetworkPolicyStatus struct {
 	// nodes holds one entry per node that has applied this policy. Each selected
 	// node writes its own entry and leaves the others alone.
 	//
 	// +listType=map
 	// +listMapKey=name
 	// +optional
-	Nodes []NodePolicyNodeStatus `json:"nodes,omitempty"`
+	Nodes []NodeNetworkPolicyNodeStatus `json:"nodes,omitempty"`
 }
 
-// NodePolicyNodeStatus is one node's report.
-type NodePolicyNodeStatus struct {
+// NodeNetworkPolicyNodeStatus is one node's report.
+type NodeNetworkPolicyNodeStatus struct {
 	// name is the node's name.
 	Name string `json:"name"`
 

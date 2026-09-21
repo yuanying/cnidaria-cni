@@ -1,4 +1,4 @@
-// Package nodepol turns NodePolicy objects (ADR 0004) into the chains that decide what
+// Package nodepol turns NodeNetworkPolicy objects (ADR 0004) into the chains that decide what
 // reaches and what leaves the node itself. It adds them to the table package nftables
 // rendered, behind the safe rules that package already put in the input and output
 // chains, and ends each direction in the verdict the policies' mode asks for: a drop

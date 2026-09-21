@@ -23,7 +23,7 @@ const (
 // What permissive mode writes to the kernel log. The prefix is part of the interface:
 // tools reading the journal look for it (ADR 0004).
 const (
-	logPrefix = "cnidaria-nodepolicy "
+	logPrefix = "cnidaria-nodenetworkpolicy "
 	logRate   = "10/second"
 )
 
@@ -47,7 +47,7 @@ func (e *PolicyError) Unwrap() error { return e.Err }
 
 func policyError(policy string, err error) error { return &PolicyError{Policy: policy, Err: err} }
 
-// Add renders every NodePolicy that selects the node into rs and reports the mode each
+// Add renders every NodeNetworkPolicy that selects the node into rs and reports the mode each
 // of those policies took effect in, which is what the node writes back to the status of
 // each (ADR 0004). A policy asking for Enforce reports Permissive while a permissive
 // policy shares a direction with it, because in that direction nothing is dropped.
@@ -61,7 +61,7 @@ func policyError(policy string, err error) error { return &PolicyError{Policy: p
 // One call renders one node's whole node policy. Calling it twice on the same table
 // declares the dispatch chains twice and jumps into them twice, which nft refuses, so
 // a reconcile renders a fresh table rather than adding to the last one (ADR 0003).
-func Add(rs *nftables.Ruleset, node Node, policies []v1alpha1.NodePolicy) (map[string]v1alpha1.Mode, error) {
+func Add(rs *nftables.Ruleset, node Node, policies []v1alpha1.NodeNetworkPolicy) (map[string]v1alpha1.Mode, error) {
 	selected, err := selects(node, policies)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func Add(rs *nftables.Ruleset, node Node, policies []v1alpha1.NodePolicy) (map[s
 		}
 		next.Chains = append(next.Chains, nftables.Chain{
 			Name:    d.dispatch,
-			Comment: fmt.Sprintf("NodePolicy %s: one jump per policy, then what %s does with the rest", d.name, mode),
+			Comment: fmt.Sprintf("NodeNetworkPolicy %s: one jump per policy, then what %s does with the rest", d.name, mode),
 			Rules:   append(jumps, verdict(mode)...),
 		})
 		if err := jumpFrom(next, d.chain, d.dispatch); err != nil {
@@ -106,7 +106,7 @@ func Add(rs *nftables.Ruleset, node Node, policies []v1alpha1.NodePolicy) (map[s
 	return modes, nil
 }
 
-// direction is one of the two things a NodePolicy governs, and everything that differs
+// direction is one of the two things a NodeNetworkPolicy governs, and everything that differs
 // between them.
 type direction struct {
 	name       string // as policyTypes spells it, for the messages
@@ -138,14 +138,14 @@ var (
 
 // entry is one ingress or egress rule with the direction's vocabulary taken out.
 type entry struct {
-	peers []v1alpha1.NodePolicyPeer
-	ports []v1alpha1.NodePolicyPort
+	peers []v1alpha1.NodeNetworkPolicyPeer
+	ports []v1alpha1.NodeNetworkPolicyPort
 }
 
 // closedBy keeps the policies that close this direction. Absent policyTypes mean what
 // they mean in NetworkPolicy: ingress always, egress when egress rules are there.
-func (d direction) closedBy(policies []v1alpha1.NodePolicy) []v1alpha1.NodePolicy {
-	var closing []v1alpha1.NodePolicy
+func (d direction) closedBy(policies []v1alpha1.NodeNetworkPolicy) []v1alpha1.NodeNetworkPolicy {
+	var closing []v1alpha1.NodeNetworkPolicy
 	for _, p := range policies {
 		closes := d.policyType == v1alpha1.PolicyTypeIngress || len(p.Spec.Egress) > 0
 		if len(p.Spec.PolicyTypes) > 0 {
@@ -158,7 +158,7 @@ func (d direction) closedBy(policies []v1alpha1.NodePolicy) []v1alpha1.NodePolic
 	return closing
 }
 
-func (d direction) entries(p v1alpha1.NodePolicy) []entry {
+func (d direction) entries(p v1alpha1.NodeNetworkPolicy) []entry {
 	var entries []entry
 	if d.policyType == v1alpha1.PolicyTypeIngress {
 		for _, r := range p.Spec.Ingress {
@@ -175,7 +175,7 @@ func (d direction) entries(p v1alpha1.NodePolicy) []entry {
 // chainFor renders one policy's rules for this direction: every peer with every port,
 // one rule each, all of them accepting. A policy with no rules for the direction gets
 // an empty chain, which accepts nothing and is what "deny everything else" looks like.
-func (d direction) chainFor(p v1alpha1.NodePolicy) (nftables.Chain, error) {
+func (d direction) chainFor(p v1alpha1.NodeNetworkPolicy) (nftables.Chain, error) {
 	name, err := nftables.Identifier(d.prefix, p.Name)
 	if err != nil {
 		return nftables.Chain{}, policyError(p.Name, err)
@@ -192,7 +192,7 @@ func (d direction) chainFor(p v1alpha1.NodePolicy) (nftables.Chain, error) {
 	}
 	return nftables.Chain{
 		Name:    name,
-		Comment: fmt.Sprintf("NodePolicy %s, %s", p.Name, d.name),
+		Comment: fmt.Sprintf("NodeNetworkPolicy %s, %s", p.Name, d.name),
 		Rules:   rules,
 	}, nil
 }
@@ -200,7 +200,7 @@ func (d direction) chainFor(p v1alpha1.NodePolicy) (nftables.Chain, error) {
 // effectiveMode is Enforce only when every policy closing the direction asks for it:
 // one permissive policy keeps the node observing (ADR 0004). An empty mode is the
 // Permissive the CRD defaults to.
-func effectiveMode(policies []v1alpha1.NodePolicy) v1alpha1.Mode {
+func effectiveMode(policies []v1alpha1.NodeNetworkPolicy) v1alpha1.Mode {
 	for _, p := range policies {
 		if p.Spec.Mode != v1alpha1.ModeEnforce {
 			return v1alpha1.ModePermissive
@@ -217,22 +217,22 @@ func effectiveMode(policies []v1alpha1.NodePolicy) v1alpha1.Mode {
 // (ADR 0004).
 func verdict(mode v1alpha1.Mode) []nftables.Rule {
 	if mode == v1alpha1.ModeEnforce {
-		return []nftables.Rule{{Verdict: "drop", Comment: "nodepolicy: no rule accepted"}}
+		return []nftables.Rule{{Verdict: "drop", Comment: "nodenetworkpolicy: no rule accepted"}}
 	}
 	return []nftables.Rule{
 		{
 			Match:   "limit rate " + logRate,
 			Verdict: fmt.Sprintf("log prefix %q", logPrefix),
-			Comment: "nodepolicy: permissive, logged",
+			Comment: "nodenetworkpolicy: permissive, logged",
 		},
-		{Verdict: "continue", Comment: "nodepolicy: permissive, counted and accepted"},
+		{Verdict: "continue", Comment: "nodenetworkpolicy: permissive, counted and accepted"},
 	}
 }
 
 // selects keeps the policies whose nodeSelector matches the node, in name order so
 // that the table does not depend on the order the policies were listed in.
-func selects(node Node, policies []v1alpha1.NodePolicy) ([]v1alpha1.NodePolicy, error) {
-	var selected []v1alpha1.NodePolicy
+func selects(node Node, policies []v1alpha1.NodeNetworkPolicy) ([]v1alpha1.NodeNetworkPolicy, error) {
+	var selected []v1alpha1.NodeNetworkPolicy
 	for _, p := range policies {
 		selector, err := metav1.LabelSelectorAsSelector(&p.Spec.NodeSelector)
 		if err != nil {
@@ -242,7 +242,7 @@ func selects(node Node, policies []v1alpha1.NodePolicy) ([]v1alpha1.NodePolicy, 
 			selected = append(selected, p)
 		}
 	}
-	slices.SortFunc(selected, func(a, b v1alpha1.NodePolicy) int {
+	slices.SortFunc(selected, func(a, b v1alpha1.NodeNetworkPolicy) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return selected, nil
@@ -258,9 +258,9 @@ func jumpFrom(rs *nftables.Ruleset, chain, dispatch string) error {
 		rules := slices.Clone(rs.Chains[i].Rules)
 		rs.Chains[i].Rules = append(rules, nftables.Rule{
 			Verdict: "jump " + dispatch,
-			Comment: "nodepolicy: everything the safe rules did not accept",
+			Comment: "nodenetworkpolicy: everything the safe rules did not accept",
 		})
 		return nil
 	}
-	return fmt.Errorf("nodepol: the table has no chain %s to put the NodePolicy jump in", chain)
+	return fmt.Errorf("nodepol: the table has no chain %s to put the NodeNetworkPolicy jump in", chain)
 }

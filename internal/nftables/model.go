@@ -1,6 +1,6 @@
 package nftables
 
-// The NetworkPolicy and NodePolicy renderers add to the table Render produced: they
+// The NetworkPolicy and NodeNetworkPolicy renderers add to the table Render produced: they
 // append their own sets and chains, fill the sets Render left empty, and put rules
 // into the chains it left for them. These are the accessors that needs. Nothing here
 // changes what Render itself emits.

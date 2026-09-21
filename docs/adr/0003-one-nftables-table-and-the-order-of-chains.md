@@ -51,8 +51,8 @@ this node's identity. Rendering runs no command and reads no kernel state.
 |---|---|---|---|
 | `egress` | forward | `filter` (0) | NetworkPolicy egress, keyed on the source pod |
 | `ingress` | forward | `filter + 1` | NetworkPolicy ingress, keyed on the destination pod |
-| `input` | input | `filter` (0) | NodePolicy ingress with the safe rules ahead of it (ADR 0004) |
-| `output` | output | `filter` (0) | NodePolicy egress with the safe rules ahead of it (ADR 0004) |
+| `input` | input | `filter` (0) | NodeNetworkPolicy ingress with the safe rules ahead of it (ADR 0004) |
+| `output` | output | `filter` (0) | NodeNetworkPolicy egress with the safe rules ahead of it (ADR 0004) |
 | `postrouting` | postrouting | `srcnat` (100) | Masquerade for pod traffic leaving the pod CIDRs |
 
 Every base chain has `policy accept`. Denial is written as an explicit `drop` at the end
@@ -121,7 +121,7 @@ kubelet probes and `exec` sessions originate on the node and reach a local pod t
 `output`, not `forward`. NetworkPolicy implementations conventionally let the node reach
 its own pods, and a cluster whose health checks are subject to user policy is a cluster
 that goes unhealthy for reasons that read as policy bugs. The `output` chain carries
-NodePolicy only.
+NodeNetworkPolicy only.
 
 ### Masquerade
 

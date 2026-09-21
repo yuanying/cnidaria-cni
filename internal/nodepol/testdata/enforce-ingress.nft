@@ -80,7 +80,7 @@ table inet cnidaria {
 		counter drop comment "isolated pod, no policy accepted"
 	}
 
-	# NodePolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain input {
 		type filter hook input priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"
@@ -93,10 +93,10 @@ table inet cnidaria {
 		tcp dport 2379-2380 counter accept comment "safe: etcd"
 		tcp dport 30000-32767 counter accept comment "safe: nodeport"
 		udp dport 30000-32767 counter accept comment "safe: nodeport"
-		counter jump input_dispatch comment "nodepolicy: everything the safe rules did not accept"
+		counter jump input_dispatch comment "nodenetworkpolicy: everything the safe rules did not accept"
 	}
 
-	# NodePolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain output {
 		type filter hook output priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"
@@ -119,17 +119,17 @@ table inet cnidaria {
 		ip6 saddr @node_pods_v6 ip6 daddr != @cluster_pods_v6 counter masquerade comment "pod traffic leaving the cluster"
 	}
 
-	# NodePolicy control-plane, ingress
+	# NodeNetworkPolicy control-plane, ingress
 	chain nodepol_in_control-plane {
-		ip saddr 198.51.100.0/24 tcp dport 9100 counter accept comment "nodepolicy control-plane"
-		ip saddr 198.51.100.0/24 udp dport 8472 counter accept comment "nodepolicy control-plane"
-		ip6 saddr 2001:db8:2::/64 tcp dport 9100 counter accept comment "nodepolicy control-plane"
-		ip6 saddr 2001:db8:2::/64 udp dport 8472 counter accept comment "nodepolicy control-plane"
+		ip saddr 198.51.100.0/24 tcp dport 9100 counter accept comment "nodenetworkpolicy control-plane"
+		ip saddr 198.51.100.0/24 udp dport 8472 counter accept comment "nodenetworkpolicy control-plane"
+		ip6 saddr 2001:db8:2::/64 tcp dport 9100 counter accept comment "nodenetworkpolicy control-plane"
+		ip6 saddr 2001:db8:2::/64 udp dport 8472 counter accept comment "nodenetworkpolicy control-plane"
 	}
 
-	# NodePolicy ingress: one jump per policy, then what Enforce does with the rest
+	# NodeNetworkPolicy ingress: one jump per policy, then what Enforce does with the rest
 	chain input_dispatch {
-		counter jump nodepol_in_control-plane comment "nodepolicy control-plane"
-		counter drop comment "nodepolicy: no rule accepted"
+		counter jump nodepol_in_control-plane comment "nodenetworkpolicy control-plane"
+		counter drop comment "nodenetworkpolicy: no rule accepted"
 	}
 }

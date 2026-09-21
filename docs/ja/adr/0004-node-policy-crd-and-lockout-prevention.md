@@ -1,7 +1,8 @@
-# ADR 0004: NodePolicy は cluster-scoped の CRD とし、既定を permissive にして、ノードを締め出せないルールを持つ
+# ADR 0004: NodeNetworkPolicy は cluster-scoped の CRD とし、既定を permissive にして、ノードを締め出せないルールを持つ
 
 - 状態: 決定（2026-09-19）。同日改訂: この記録の最初の版が選んだ commit-confirmed な
   適用を、permissive モードに置き換えた。
+- 改訂（2026-09-21）: kind を NodePolicy から NodeNetworkPolicy に改名した。
 
 ## 背景
 
@@ -23,7 +24,7 @@ drop するルールの最初の適用は、稼働中のクラスター上で、
 
 ### 形
 
-`NodePolicy`、cluster-scoped、API グループ `cnidaria.unstable.cloud`、バージョン
+`NodeNetworkPolicy`、cluster-scoped、API グループ `cnidaria.unstable.cloud`、バージョン
 `v1alpha1`。グループは regied と同じくプロジェクトが管理するドメインの下に置き、バイナリ
 名を変えても API が動かないよう、バイナリの名前はそこに含めない。
 
@@ -52,7 +53,7 @@ drop するルールの最初の適用は、稼働中のクラスター上で、
 
 ### ポリシーが取り除けない安全ルール
 
-すべての `input` と `output` チェインは、NodePolicy が存在するかどうかにかかわらず、
+すべての `input` と `output` チェインは、NodeNetworkPolicy が存在するかどうかにかかわらず、
 ポリシーが参照される前に以下のルールで始まる。これらはポリシーではなく、それを切る
 フィールドは無い。
 
@@ -79,18 +80,18 @@ L2 モードの MetalLB はこの表に無いが、それは必要が無いか�
 それを見せるのが permissive モードである。
 
 これらを無条件に accept するのは、最初のバージョンにおける意図的な粗さである。
-オペレーターは NodePolicy で SSH を管理用レンジに絞ることができない。安全ルールを送信元で
+オペレーターは NodeNetworkPolicy で SSH を管理用レンジに絞ることができない。安全ルールを送信元で
 絞るのはこの記録への後の変更であって、安全ルール無しで始める理由にはならない。
 
 ### 既定は permissive
 
-NodePolicy はどちらのモードでも同じようにレンダリングされる。安全ルール、次にポリシーの
+NodeNetworkPolicy はどちらのモードでも同じようにレンダリングされる。安全ルール、次にポリシーの
 チェインへの dispatch、そしてどのルールにも accept されなかったパケットへの verdict。
 違うのはその最後の verdict だけである。
 
 | モード | dispatch チェイン末尾の verdict |
 |---|---|
-| `Permissive` | `limit rate` → `log prefix "cnidaria-nodepolicy "` → `counter` → base chain の `policy accept` に落ちる |
+| `Permissive` | `limit rate` → `log prefix "cnidaria-nodenetworkpolicy "` → `counter` → base chain の `policy accept` に落ちる |
 | `Enforce` | `counter` → `drop` |
 
 `Permissive` では、ポリシーが拒否するはずのパケットは accept され、その送信元・宛先・
@@ -145,7 +146,7 @@ Go の型は controller-gen のマーカーを持つ。`deploy/crd` の下の CR
   いるオブジェクトから、それぞれが宣言するモードでルールセットをレンダリングして適用する
   （ADR 0003）。起動も他の reconcile と同じである。
 - Pod からノード自身のソケットへの ingress（hostNetwork のサービスに届く Pod、ノードから
-  scrape されるメトリクス）は、`ipBlock` に Pod CIDR を使って、他の送信元と同じく NodePolicy
+  scrape されるメトリクス）は、`ipBlock` に Pod CIDR を使って、他の送信元と同じく NodeNetworkPolicy
   が統べる。ノードポリシーの相手としての Pod セレクタは、具体的な必要が現れたときに
   足せる。省くことで最初のバージョンの相手は静的に保たれ、安全ルールの推論が単純になる。
 - cluster-scoped オブジェクトの status は、選択されたすべてのノードが書く。status
@@ -159,3 +160,15 @@ Go の型は controller-gen のマーカーを持つ。`deploy/crd` の下の CR
 - netns テストベッド（ADR 0008）は、選択されたノードについて、列挙されていないポートが
   `Permissive` ではログに出て数えられつつ届くこと、`Enforce` では拒否されること、そして
   kubelet 風と API サーバー風の接続がどちらでも生き残ることを assert する。
+
+## 改訂
+
+**2026-09-21、kind を NodeNetworkPolicy に改名。** kind は最初 NodePolicy と呼んでいたが、
+この名前ではネットワークのポリシーであることが分からない。他の実装は NetworkPolicy という
+語を残し、選ぶ対象の方を変えている。Calico の GlobalNetworkPolicy と HostEndpoint、Cilium の
+CiliumClusterwideNetworkPolicy の `nodeSelector`、Antrea の ClusterNetworkPolicy の
+`nodeSelector`（Antrea はこの機能を Node NetworkPolicy と呼ぶ）である。標準の NetworkPolicy
+との対応が名前から読めるよう、kind を NodeNetworkPolicy（plural は `nodenetworkpolicies`、
+短縮名は `nnp`）にした。API group、version、フィールド、意味論は変えていない。ログの prefix も
+kind に合わせて `cnidaria-nodenetworkpolicy ` に変えた。上の帰結で変わらないとしたインター
+フェースへの変更はこれだけであり、API がまだ `v1alpha1` のうちに行った。
