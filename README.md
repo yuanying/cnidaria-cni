@@ -24,7 +24,7 @@ it.
 - Keeps a route to every other node's pod CIDRs, per address family, with that node's
   InternalIP as the next hop.
 - Renders NetworkPolicy v1 into one nftables table, `inet cnidaria`.
-- Accepts a cluster-scoped `NodePolicy` for the node's own `input` and `output`, with
+- Accepts a cluster-scoped `NodeNetworkPolicy` for the node's own `input` and `output`, with
   safe rules a policy cannot remove. A policy is permissive by default: what it would
   drop is logged and counted until `Enforce` is chosen.
 - Source-NATs pod traffic that leaves the cluster's pod CIDRs.
@@ -61,7 +61,7 @@ reference plugins.
 kubectl apply -k deploy
 ```
 
-That installs five objects: the `NodePolicy` CRD, a ClusterRole and a
+That installs five objects: the `NodeNetworkPolicy` CRD, a ClusterRole and a
 ClusterRoleBinding, all three cluster-scoped, and a ServiceAccount and the DaemonSet in
 `kube-system`. The image tag to deploy is the `images:` entry of
 `deploy/kustomization.yaml`, which an overlay can override; images are published to
@@ -75,9 +75,9 @@ A node is working when its conflist is at `/etc/cni/net.d/10-cnidaria.conflist`,
 `ip route show proto 200` lists the other nodes' pod CIDRs, and the table
 `inet cnidaria` is there.
 
-## NodePolicy: the node's own traffic
+## NodeNetworkPolicy: the node's own traffic
 
-NetworkPolicy governs pods only. `NodePolicy` is cluster-scoped, selects nodes by
+NetworkPolicy governs pods only. `NodeNetworkPolicy` is cluster-scoped, selects nodes by
 label, and is rendered into the node's `input` and `output` chains (ADR 0004).
 
 Two things keep it from locking a node out.
@@ -94,15 +94,15 @@ is in [ADR 0004](docs/adr/0004-node-policy-crd-and-lockout-prevention.md).
 nothing: what `Enforce` would drop is logged and counted instead. The way to put a
 policy into service is therefore:
 
-1. Apply it as it is. A `NodePolicy` with no `mode` is `Permissive`.
+1. Apply it as it is. A `NodeNetworkPolicy` with no `mode` is `Permissive`.
 2. Watch what it would have dropped, for as long as the node's traffic pattern needs —
    a full day for a node whose backups run at night.
 
    ```sh
-   journalctl -k | grep cnidaria-nodepolicy   # source, destination, protocol, port
+   journalctl -k | grep cnidaria-nodenetworkpolicy   # source, destination, protocol, port
    nft list chain inet cnidaria input         # the counters, which are not rate-limited
-   kubectl get nodepolicies                   # the mode each policy asks for
-   kubectl get nodepolicy NAME -o yaml        # status.nodes[]: what each node got
+   kubectl get nodenetworkpolicies                   # the mode each policy asks for
+   kubectl get nodenetworkpolicy NAME -o yaml        # status.nodes[]: what each node got
    ```
 
    The column `kubectl get` prints is `spec.mode`, which is what the policy asks for.
@@ -120,7 +120,7 @@ like anything else.
 
 ```yaml
 apiVersion: cnidaria.unstable.cloud/v1alpha1
-kind: NodePolicy
+kind: NodeNetworkPolicy
 metadata:
   name: workers
 spec:
@@ -154,10 +154,10 @@ What is outside it:
 
 | Not covered | Why |
 |---|---|
-| Pods with `hostNetwork` | They carry the node's addresses. A policy that named one would name the node; `NodePolicy` is what governs that traffic |
+| Pods with `hostNetwork` | They carry the node's addresses. A policy that named one would name the node; `NodeNetworkPolicy` is what governs that traffic |
 | A node reaching a pod on itself | It leaves the node's own `output`, not the forward path, so a pod ingress policy never sees it. Kubelet probes and `exec` depend on this, and one of the safe rules above keeps it open |
 | Terminated pods | A pod that has Succeeded or Failed keeps its addresses in the API until something deletes it, and one of them may already belong to a running pod. They are left out of every selection |
-| Observing mode for NetworkPolicy | `Permissive` exists for `NodePolicy` only. A pod policy drops from the moment it is applied, as it does everywhere else |
+| Observing mode for NetworkPolicy | `Permissive` exists for `NodeNetworkPolicy` only. A pod policy drops from the moment it is applied, as it does everywhere else |
 
 ## Configuration
 

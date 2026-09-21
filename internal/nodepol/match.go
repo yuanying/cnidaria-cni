@@ -14,7 +14,7 @@ import (
 // ruleset" on the node reads in the operator's vocabulary (ADR 0003). A name long
 // enough to pass what nft takes in a comment is cut down by the nftables package
 // when the text is written; a policy is not refused over the length of its name.
-func comment(name string) string { return "nodepolicy " + name }
+func comment(name string) string { return "nodenetworkpolicy " + name }
 
 // matches turns one ingress or egress rule into the match part of every nft rule it
 // allows: each peer with each port. A rule with no peers allows every address and one
@@ -56,7 +56,7 @@ func collect[T any](elements []T, render func(T) (string, error)) ([]string, err
 
 // peerMatch is the address part of a rule. The exceptions of an ipBlock become a
 // negated anonymous set beside the prefix, which keeps the peer one rule.
-func (d direction) peerMatch(peer v1alpha1.NodePolicyPeer) (string, error) {
+func (d direction) peerMatch(peer v1alpha1.NodeNetworkPolicyPeer) (string, error) {
 	if peer.IPBlock == nil {
 		return "", fmt.Errorf("a peer needs an ipBlock")
 	}
@@ -103,7 +103,7 @@ func prefix(cidr string) (netip.Prefix, error) {
 
 // portMatch is the protocol and port part of a rule. A port entry that names only a
 // protocol covers every port of it.
-func portMatch(port v1alpha1.NodePolicyPort) (string, error) {
+func portMatch(port v1alpha1.NodeNetworkPolicyPort) (string, error) {
 	proto, err := protocol(port.Protocol)
 	if err != nil {
 		return "", err

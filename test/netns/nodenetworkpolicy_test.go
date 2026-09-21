@@ -34,7 +34,7 @@ const (
 var segmentPrefixes = []string{"203.0.113.0/24", "2001:db8::/64"}
 
 // policyBed is a node with a policy on it and a neighbour to knock on its door with.
-// Neither is a pod: what a NodePolicy governs is the node's own sockets.
+// Neither is a pod: what a NodeNetworkPolicy governs is the node's own sockets.
 type policyBed struct {
 	node, peer *testbed.Node
 }
@@ -65,7 +65,7 @@ func newPolicyBed(t *testing.T) policyBed {
 // apply renders the table this node would carry with those policies and applies it,
 // the way the daemon's reconciler does: the skeleton from nftables, the policies from
 // nodepol, one nft -f. The daemon itself is not in the loop (ADR 0008).
-func (b policyBed) apply(t *testing.T, policies ...v1alpha1.NodePolicy) map[string]v1alpha1.Mode {
+func (b policyBed) apply(t *testing.T, policies ...v1alpha1.NodeNetworkPolicy) map[string]v1alpha1.Mode {
 	t.Helper()
 	ruleset, err := nftables.Render(nftables.Params{
 		PodCIDRs:        b.node.PodCIDRs,
@@ -149,9 +149,9 @@ func TestEnforcedEgressDropsWhatThePolicyDoesNotList(t *testing.T) {
 	bed := newPolicyBed(t)
 	policy := ingressPolicy("upstream", v1alpha1.ModeEnforce)
 	policy.Spec.PolicyTypes = []v1alpha1.PolicyType{v1alpha1.PolicyTypeEgress}
-	policy.Spec.Egress = []v1alpha1.NodePolicyEgressRule{{
+	policy.Spec.Egress = []v1alpha1.NodeNetworkPolicyEgressRule{{
 		To:    peers(),
-		Ports: []v1alpha1.NodePolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(allowedPort))}},
+		Ports: []v1alpha1.NodeNetworkPolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(allowedPort))}},
 	}}
 	policy.Spec.Ingress = nil
 	bed.apply(t, policy)
@@ -172,23 +172,23 @@ func TestEnforcedEgressDropsWhatThePolicyDoesNotList(t *testing.T) {
 }
 
 // ingressPolicy allows the segment on one port and nothing else.
-func ingressPolicy(name string, mode v1alpha1.Mode) v1alpha1.NodePolicy {
-	return v1alpha1.NodePolicy{
+func ingressPolicy(name string, mode v1alpha1.Mode) v1alpha1.NodeNetworkPolicy {
+	return v1alpha1.NodeNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: v1alpha1.NodePolicySpec{
+		Spec: v1alpha1.NodeNetworkPolicySpec{
 			Mode: mode,
-			Ingress: []v1alpha1.NodePolicyIngressRule{{
+			Ingress: []v1alpha1.NodeNetworkPolicyIngressRule{{
 				From:  peers(),
-				Ports: []v1alpha1.NodePolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(allowedPort))}},
+				Ports: []v1alpha1.NodeNetworkPolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(allowedPort))}},
 			}},
 		},
 	}
 }
 
-func peers() []v1alpha1.NodePolicyPeer {
-	out := make([]v1alpha1.NodePolicyPeer, 0, len(segmentPrefixes))
+func peers() []v1alpha1.NodeNetworkPolicyPeer {
+	out := make([]v1alpha1.NodeNetworkPolicyPeer, 0, len(segmentPrefixes))
 	for _, cidr := range segmentPrefixes {
-		out = append(out, v1alpha1.NodePolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cidr}})
+		out = append(out, v1alpha1.NodeNetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: cidr}})
 	}
 	return out
 }
@@ -224,7 +224,7 @@ func ping(from *testbed.Node, to netip.Addr) error {
 
 // This is the comment nodepol puts on the rule that counts, without a rate limit,
 // what Enforce would have dropped.
-const permissiveCounterComment = "nodepolicy: permissive, counted and accepted"
+const permissiveCounterComment = "nodenetworkpolicy: permissive, counted and accepted"
 
 var packetsCounted = regexp.MustCompile(`counter packets (\d+)`)
 

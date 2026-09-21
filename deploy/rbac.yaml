@@ -1,5 +1,5 @@
 # What the daemon is allowed to read and write. It watches the objects it renders and
-# writes nothing back except NodePolicy status, so every rule here is read-only apart
+# writes nothing back except NodeNetworkPolicy status, so every rule here is read-only apart
 # from that one (ADR 0004, ADR 0007).
 apiVersion: v1
 kind: ServiceAccount
@@ -29,12 +29,12 @@ rules:
     resources: [networkpolicies]
     verbs: [get, list, watch]
   - apiGroups: [cnidaria.unstable.cloud]
-    resources: [nodepolicies]
+    resources: [nodenetworkpolicies]
     verbs: [get, list, watch]
-  # A NodePolicy is cluster-scoped and every selected node reports back into its own
+  # A NodeNetworkPolicy is cluster-scoped and every selected node reports back into its own
   # entry of status.nodes, through the status subresource so the writes do not collide.
   - apiGroups: [cnidaria.unstable.cloud]
-    resources: [nodepolicies/status]
+    resources: [nodenetworkpolicies/status]
     verbs: [update, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

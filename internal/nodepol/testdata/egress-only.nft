@@ -80,7 +80,7 @@ table inet cnidaria {
 		counter drop comment "isolated pod, no policy accepted"
 	}
 
-	# NodePolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain input {
 		type filter hook input priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"
@@ -95,7 +95,7 @@ table inet cnidaria {
 		udp dport 30000-32767 counter accept comment "safe: nodeport"
 	}
 
-	# NodePolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain output {
 		type filter hook output priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"
@@ -109,7 +109,7 @@ table inet cnidaria {
 		udp dport 53 counter accept comment "safe: dns"
 		ip daddr @node_pods_v4 counter accept comment "safe: this node's pods"
 		ip6 daddr @node_pods_v6 counter accept comment "safe: this node's pods"
-		counter jump output_dispatch comment "nodepolicy: everything the safe rules did not accept"
+		counter jump output_dispatch comment "nodenetworkpolicy: everything the safe rules did not accept"
 	}
 
 	# Masquerade for pod traffic leaving the cluster's pod CIDRs (ADR 0001, ADR 0003)
@@ -119,15 +119,15 @@ table inet cnidaria {
 		ip6 saddr @node_pods_v6 ip6 daddr != @cluster_pods_v6 counter masquerade comment "pod traffic leaving the cluster"
 	}
 
-	# NodePolicy upstream, egress
+	# NodeNetworkPolicy upstream, egress
 	chain nodepol_out_upstream {
-		ip daddr 203.0.113.0/24 tcp dport 443 counter accept comment "nodepolicy upstream"
-		ip6 daddr 2001:db8:3::/64 counter accept comment "nodepolicy upstream"
+		ip daddr 203.0.113.0/24 tcp dport 443 counter accept comment "nodenetworkpolicy upstream"
+		ip6 daddr 2001:db8:3::/64 counter accept comment "nodenetworkpolicy upstream"
 	}
 
-	# NodePolicy egress: one jump per policy, then what Enforce does with the rest
+	# NodeNetworkPolicy egress: one jump per policy, then what Enforce does with the rest
 	chain output_dispatch {
-		counter jump nodepol_out_upstream comment "nodepolicy upstream"
-		counter drop comment "nodepolicy: no rule accepted"
+		counter jump nodepol_out_upstream comment "nodenetworkpolicy upstream"
+		counter drop comment "nodenetworkpolicy: no rule accepted"
 	}
 }

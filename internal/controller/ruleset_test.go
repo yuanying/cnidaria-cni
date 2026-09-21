@@ -89,7 +89,7 @@ func newRulesetReconciler(t *testing.T, a *applied, objs ...client.Object) *Rule
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(objs...).
-		WithStatusSubresource(&v1alpha1.NodePolicy{}).
+		WithStatusSubresource(&v1alpha1.NodeNetworkPolicy{}).
 		Build()
 	return &Ruleset{Client: c, NodeName: "node-a", SafePorts: nftables.DefaultSafePorts, Applier: a}
 }
@@ -362,7 +362,7 @@ func TestRulesetIgnoresPodsThatHaveFinished(t *testing.T) {
 	}
 }
 
-// withLabels gives the named node its labels, which is what a NodePolicy selects on.
+// withLabels gives the named node its labels, which is what a NodeNetworkPolicy selects on.
 func withLabels(objs []client.Object, name string, labels map[string]string) []client.Object {
 	for _, o := range objs {
 		if n, ok := o.(*corev1.Node); ok && n.Name == name {
@@ -375,51 +375,51 @@ func withLabels(objs []client.Object, name string, labels map[string]string) []c
 // workers selects the node the reconciler runs on in the cluster below.
 var workers = metav1.LabelSelector{MatchLabels: map[string]string{"role": "worker"}}
 
-func nodePolicyCluster() []client.Object {
+func nodeNetworkPolicyCluster() []client.Object {
 	return withLabels(cluster(), "node-a", map[string]string{"role": "worker"})
 }
 
-func metricsPolicy(mode v1alpha1.Mode) *v1alpha1.NodePolicy {
-	return &v1alpha1.NodePolicy{
+func metricsPolicy(mode v1alpha1.Mode) *v1alpha1.NodeNetworkPolicy {
+	return &v1alpha1.NodeNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "metrics", Generation: 3},
-		Spec: v1alpha1.NodePolicySpec{
+		Spec: v1alpha1.NodeNetworkPolicySpec{
 			Mode:         mode,
 			NodeSelector: workers,
-			Ingress: []v1alpha1.NodePolicyIngressRule{{
-				From:  []v1alpha1.NodePolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "203.0.113.0/24"}}},
-				Ports: []v1alpha1.NodePolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(9100))}},
+			Ingress: []v1alpha1.NodeNetworkPolicyIngressRule{{
+				From:  []v1alpha1.NodeNetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "203.0.113.0/24"}}},
+				Ports: []v1alpha1.NodeNetworkPolicyPort{{Protocol: corev1.ProtocolTCP, Port: ptr(int32(9100))}},
 			}},
 		},
 	}
 }
 
-func policyOf(t *testing.T, r *Ruleset, name string) v1alpha1.NodePolicy {
+func policyOf(t *testing.T, r *Ruleset, name string) v1alpha1.NodeNetworkPolicy {
 	t.Helper()
-	var policy v1alpha1.NodePolicy
+	var policy v1alpha1.NodeNetworkPolicy
 	if err := r.Get(t.Context(), client.ObjectKey{Name: name}, &policy); err != nil {
-		t.Fatalf("reading back NodePolicy %s: %v", name, err)
+		t.Fatalf("reading back NodeNetworkPolicy %s: %v", name, err)
 	}
 	return policy
 }
 
-func statusOf(t *testing.T, r *Ruleset, name string) []v1alpha1.NodePolicyNodeStatus {
+func statusOf(t *testing.T, r *Ruleset, name string) []v1alpha1.NodeNetworkPolicyNodeStatus {
 	t.Helper()
 	return policyOf(t, r, name).Status.Nodes
 }
 
-// A NodePolicy goes into the same table as everything else, behind the safe rules it
+// A NodeNetworkPolicy goes into the same table as everything else, behind the safe rules it
 // cannot remove, and what it did on this node goes into its status (ADR 0004).
-func TestRulesetRendersNodePolicyAndReportsWhatItDid(t *testing.T) {
+func TestRulesetRendersNodeNetworkPolicyAndReportsWhatItDid(t *testing.T) {
 	a := &applied{}
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), metricsPolicy(v1alpha1.ModeEnforce))...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), metricsPolicy(v1alpha1.ModeEnforce))...)
 	mustReconcile(t, r)
 
 	got := a.last(t)
 	for _, want := range []string{
-		`ip saddr 203.0.113.0/24 tcp dport 9100 counter accept comment "nodepolicy metrics"`,
-		`counter jump nodepol_in_metrics comment "nodepolicy metrics"`,
-		`counter jump input_dispatch comment "nodepolicy: everything the safe rules did not accept"`,
-		`counter drop comment "nodepolicy: no rule accepted"`,
+		`ip saddr 203.0.113.0/24 tcp dport 9100 counter accept comment "nodenetworkpolicy metrics"`,
+		`counter jump nodepol_in_metrics comment "nodenetworkpolicy metrics"`,
+		`counter jump input_dispatch comment "nodenetworkpolicy: everything the safe rules did not accept"`,
+		`counter drop comment "nodenetworkpolicy: no rule accepted"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the applied table lacks %q:\n%s", want, got)
@@ -427,10 +427,10 @@ func TestRulesetRendersNodePolicyAndReportsWhatItDid(t *testing.T) {
 	}
 	// The jump into the policy comes after the safe rules, never before them.
 	if strings.Index(got, `comment "safe: kubelet"`) > strings.Index(got, "jump input_dispatch") {
-		t.Errorf("the NodePolicy jump sits ahead of the safe rules:\n%s", got)
+		t.Errorf("the NodeNetworkPolicy jump sits ahead of the safe rules:\n%s", got)
 	}
 
-	want := []v1alpha1.NodePolicyNodeStatus{
+	want := []v1alpha1.NodeNetworkPolicyNodeStatus{
 		{Name: "node-a", ObservedGeneration: 3, Mode: v1alpha1.ModeEnforce},
 	}
 	if diff := statusOf(t, r, "metrics"); !reflect.DeepEqual(diff, want) {
@@ -443,17 +443,17 @@ func TestRulesetRendersNodePolicyAndReportsWhatItDid(t *testing.T) {
 // entry out rather than leaving a mode behind that is not in force.
 func TestRulesetWritesOnlyItsOwnEntryInTheStatus(t *testing.T) {
 	a := &applied{}
-	elsewhere := v1alpha1.NodePolicyNodeStatus{Name: "node-b", ObservedGeneration: 1, Mode: v1alpha1.ModeEnforce}
+	elsewhere := v1alpha1.NodeNetworkPolicyNodeStatus{Name: "node-b", ObservedGeneration: 1, Mode: v1alpha1.ModeEnforce}
 	policy := metricsPolicy(v1alpha1.ModeEnforce)
 	policy.Spec.NodeSelector = metav1.LabelSelector{MatchLabels: map[string]string{"role": "storage"}}
-	policy.Status.Nodes = []v1alpha1.NodePolicyNodeStatus{
+	policy.Status.Nodes = []v1alpha1.NodeNetworkPolicyNodeStatus{
 		{Name: "node-a", ObservedGeneration: 1, Mode: v1alpha1.ModeEnforce},
 		elsewhere,
 	}
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), policy)...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), policy)...)
 	mustReconcile(t, r)
 
-	want := []v1alpha1.NodePolicyNodeStatus{elsewhere}
+	want := []v1alpha1.NodeNetworkPolicyNodeStatus{elsewhere}
 	if got := statusOf(t, r, "metrics"); !reflect.DeepEqual(got, want) {
 		t.Errorf("status.nodes = %+v, want %+v", got, want)
 	}
@@ -464,15 +464,15 @@ func TestRulesetWritesOnlyItsOwnEntryInTheStatus(t *testing.T) {
 
 // A policy that cannot be rendered is reported in that policy's own status, and the
 // node keeps the table it is already running rather than one with the policy missing.
-func TestRulesetReportsANodePolicyItCannotRender(t *testing.T) {
+func TestRulesetReportsANodeNetworkPolicyItCannotRender(t *testing.T) {
 	a := &applied{}
 	policy := metricsPolicy(v1alpha1.ModeEnforce)
 	policy.Spec.Ingress[0].From[0].IPBlock.CIDR = "203.0.113.1/24" // bits below the prefix
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), policy)...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), policy)...)
 	mustReconcile(t, r)
 
 	if len(a.texts) != 0 {
-		t.Errorf("a table was applied although a NodePolicy could not be rendered:\n%s", a.texts[0])
+		t.Errorf("a table was applied although a NodeNetworkPolicy could not be rendered:\n%s", a.texts[0])
 	}
 	got := statusOf(t, r, "metrics")
 	if len(got) != 1 || got[0].Name != "node-a" || got[0].Message == "" {
@@ -501,10 +501,10 @@ func TestRulesetDoesNotWriteAPolicyItHasNothingToSayAbout(t *testing.T) {
 	a := &applied{}
 	policy := metricsPolicy(v1alpha1.ModeEnforce)
 	policy.Spec.NodeSelector = metav1.LabelSelector{MatchLabels: map[string]string{"role": "storage"}}
-	policy.Status.Nodes = []v1alpha1.NodePolicyNodeStatus{
+	policy.Status.Nodes = []v1alpha1.NodeNetworkPolicyNodeStatus{
 		{Name: "node-b", ObservedGeneration: 3, Mode: v1alpha1.ModeEnforce},
 	}
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), policy)...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), policy)...)
 
 	before := policyOf(t, r, "metrics").ResourceVersion
 	mustReconcile(t, r)
@@ -518,7 +518,7 @@ func TestRulesetDoesNotWriteAPolicyItHasNothingToSayAbout(t *testing.T) {
 // after the table is on the node and not at all when nft refused it.
 func TestRulesetWritesNoStatusWhenTheTableWasNotApplied(t *testing.T) {
 	a := &applied{fail: errors.New("nft said no")}
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), metricsPolicy(v1alpha1.ModeEnforce))...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), metricsPolicy(v1alpha1.ModeEnforce))...)
 	if _, err := r.Reconcile(ctrl.LoggerInto(t.Context(), testLogger(t)), ctrl.Request{}); err == nil {
 		t.Fatal("Reconcile: nft refused the table and no error came back")
 	}
@@ -531,15 +531,15 @@ func TestRulesetWritesNoStatusWhenTheTableWasNotApplied(t *testing.T) {
 // version bump every other node has to take.
 func TestRulesetDoesNotRewriteAStatusItDidNotChange(t *testing.T) {
 	a := &applied{}
-	r := newRulesetReconciler(t, a, append(nodePolicyCluster(), metricsPolicy(v1alpha1.ModePermissive))...)
+	r := newRulesetReconciler(t, a, append(nodeNetworkPolicyCluster(), metricsPolicy(v1alpha1.ModePermissive))...)
 	mustReconcile(t, r)
 
-	var first v1alpha1.NodePolicy
+	var first v1alpha1.NodeNetworkPolicy
 	if err := r.Get(t.Context(), client.ObjectKey{Name: "metrics"}, &first); err != nil {
 		t.Fatal(err)
 	}
 	mustReconcile(t, r)
-	var second v1alpha1.NodePolicy
+	var second v1alpha1.NodeNetworkPolicy
 	if err := r.Get(t.Context(), client.ObjectKey{Name: "metrics"}, &second); err != nil {
 		t.Fatal(err)
 	}

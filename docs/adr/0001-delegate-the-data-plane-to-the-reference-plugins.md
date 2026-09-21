@@ -77,7 +77,7 @@ life of a Node object, so it does not.
 | Which conflist a node gets | cnidaria daemon |
 | Routes to peer nodes' pod CIDRs | cnidaria daemon (ADR 0006) |
 | Source NAT for pod traffic leaving the cluster network | cnidaria daemon (ADR 0003) |
-| NetworkPolicy and NodePolicy enforcement | cnidaria daemon (ADR 0003, 0004) |
+| NetworkPolicy and NodeNetworkPolicy enforcement | cnidaria daemon (ADR 0003, 0004) |
 | Service load balancing | kube-proxy, untouched |
 
 Masquerade needs a note. Under flannel the `--ip-masq` flag installed the rule that

@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: nodepolicies.cnidaria.unstable.cloud
+  name: nodenetworkpolicies.cnidaria.unstable.cloud
 spec:
   group: cnidaria.unstable.cloud
   names:
-    kind: NodePolicy
-    listKind: NodePolicyList
-    plural: nodepolicies
+    kind: NodeNetworkPolicy
+    listKind: NodeNetworkPolicyList
+    plural: nodenetworkpolicies
     shortNames:
-    - nodepol
-    singular: nodepolicy
+    - nnp
+    singular: nodenetworkpolicy
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -27,7 +27,7 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          NodePolicy governs what may reach and what may leave the node itself, which is the
+          NodeNetworkPolicy governs what may reach and what may leave the node itself, which is the
           traffic NetworkPolicy does not describe (ADR 0004). It is cluster-scoped, selects
           nodes by label, and drops nothing until an operator asks for Enforce.
 
@@ -57,7 +57,7 @@ spec:
             type: object
           spec:
             description: |-
-              NodePolicySpec is the policy itself. Its vocabulary is NetworkPolicy's on purpose:
+              NodeNetworkPolicySpec is the policy itself. Its vocabulary is NetworkPolicy's on purpose:
               an operator who can write one can write the other.
             properties:
               egress:
@@ -65,7 +65,7 @@ spec:
                   same defaults as ingress.
                 items:
                   description: |-
-                    NodePolicyEgressRule allows traffic that matches one of its peers and one of its
+                    NodeNetworkPolicyEgressRule allows traffic that matches one of its peers and one of its
                     ports.
                   properties:
                     ports:
@@ -73,7 +73,7 @@ spec:
                         Empty allows every port.
                       items:
                         description: |-
-                          NodePolicyPort is one protocol and one port or range of ports. Ports are numbers
+                          NodeNetworkPolicyPort is one protocol and one port or range of ports. Ports are numbers
                           here and never names: a node has no container ports for a name to refer to.
 
                           What a range has to hold is stated to the API server as well as checked when the
@@ -118,7 +118,7 @@ spec:
                         allows every destination.
                       items:
                         description: |-
-                          NodePolicyPeer is the other end of the traffic. Pod and namespace selectors are not
+                          NodeNetworkPolicyPeer is the other end of the traffic. Pod and namespace selectors are not
                           peers here: a node is addressed by the network, not by the cluster (ADR 0004). Pods
                           are reached through their CIDRs like any other address.
                         properties:
@@ -155,7 +155,7 @@ spec:
                   from anywhere, and one with no ports accepts on every port.
                 items:
                   description: |-
-                    NodePolicyIngressRule allows traffic that matches one of its peers and one of its
+                    NodeNetworkPolicyIngressRule allows traffic that matches one of its peers and one of its
                     ports.
                   properties:
                     from:
@@ -163,7 +163,7 @@ spec:
                         every source.
                       items:
                         description: |-
-                          NodePolicyPeer is the other end of the traffic. Pod and namespace selectors are not
+                          NodeNetworkPolicyPeer is the other end of the traffic. Pod and namespace selectors are not
                           peers here: a node is addressed by the network, not by the cluster (ADR 0004). Pods
                           are reached through their CIDRs like any other address.
                         properties:
@@ -197,7 +197,7 @@ spec:
                         Empty allows every port.
                       items:
                         description: |-
-                          NodePolicyPort is one protocol and one port or range of ports. Ports are numbers
+                          NodeNetworkPolicyPort is one protocol and one port or range of ports. Ports are numbers
                           here and never names: a node has no container ports for a name to refer to.
 
                           What a range has to hold is stated to the API server as well as checked when the
@@ -311,14 +311,14 @@ spec:
                 type: array
             type: object
           status:
-            description: NodePolicyStatus is what the nodes report back.
+            description: NodeNetworkPolicyStatus is what the nodes report back.
             properties:
               nodes:
                 description: |-
                   nodes holds one entry per node that has applied this policy. Each selected
                   node writes its own entry and leaves the others alone.
                 items:
-                  description: NodePolicyNodeStatus is one node's report.
+                  description: NodeNetworkPolicyNodeStatus is one node's report.
                   properties:
                     message:
                       description: |-

@@ -14,7 +14,7 @@ const (
 
 // Ruleset is the table: its sets, then its chains, in the order they are written.
 //
-// It is a structure rather than text so that the NetworkPolicy and NodePolicy renderers
+// It is a structure rather than text so that the NetworkPolicy and NodeNetworkPolicy renderers
 // can add their sets and chains to what Render produced. String is the text to hand to
 // "nft -f".
 type Ruleset struct {

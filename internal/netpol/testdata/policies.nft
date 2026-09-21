@@ -184,7 +184,7 @@ table inet cnidaria {
 		counter drop comment "isolated pod, no policy accepted"
 	}
 
-	# NodePolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy ingress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain input {
 		type filter hook input priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"
@@ -199,7 +199,7 @@ table inet cnidaria {
 		udp dport 30000-32767 counter accept comment "safe: nodeport"
 	}
 
-	# NodePolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
+	# NodeNetworkPolicy egress, behind the safe rules a policy cannot remove (ADR 0004)
 	chain output {
 		type filter hook output priority filter; policy accept;
 		ct state established,related counter accept comment "safe: replies to what the node opened"

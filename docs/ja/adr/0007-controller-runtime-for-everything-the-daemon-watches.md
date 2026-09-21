@@ -6,7 +6,7 @@
 
 デーモンは 5 種類のオブジェクトに反応する。Node（経路、マスカレードのセット、conflist）、
 Pod と Namespace（セレクターがどのアドレスを指すか）、NetworkPolicy、そして自前の
-NodePolicy CRD である。これらすべてがノードごとに 1 つの出力 —— ルーティングテーブルと
+NodeNetworkPolicy CRD である。これらすべてがノードごとに 1 つの出力 —— ルーティングテーブルと
 1 つの nftables テーブル —— に流れ込むので、欲しいのはそれらのオブジェクトのキャッシュと
 「何かが変わった」という合図であって、オブジェクトごとの帳簿ではない。
 
@@ -39,7 +39,7 @@ NodePolicy CRD である。これらすべてがノードごとに 1 つの出�
   | Reconciler | トリガー | すること |
   |---|---|---|
   | routes | Node の追加 / 更新 / 削除 | 経路の全集合を計算し直す（ADR 0006）。自ノードのオブジェクトに対しては conflist を 1 度書く（ADR 0001） |
-  | ruleset | Pod、Namespace、NetworkPolicy、NodePolicy、Node | `inet cnidaria` をレンダリングして適用する（ADR 0003、0004） |
+  | ruleset | Pod、Namespace、NetworkPolicy、NodeNetworkPolicy、Node | `inet cnidaria` をレンダリングして適用する（ADR 0003、0004） |
 
   ruleset reconciler へのイベントはすべて 1 つの固定のリクエストキーに写像するので、
   ワークキューが Pod イベントのバーストを 1 回の reconcile にまとめる。これが ADR 0003 が
@@ -60,8 +60,8 @@ NodePolicy CRD である。これらすべてがノードごとに 1 つの出�
   2 つの関数と 1 つの manager を見つけ、その周りに生成されたフレームワークは無い。
 - controller-runtime のバージョンが `k8s.io` モジュールのバージョンを固定する。使用中の
   クラスターバージョンと互換になるように選び、まとめて動かす。
-- NodePolicy の status 更新（ADR 0004）は、manager のクライアントで status サブリソースを
+- NodeNetworkPolicy の status 更新（ADR 0004）は、manager のクライアントで status サブリソースを
   通して行う。すべての読み取りと同じクライアントである。
 - 後にオブジェクトごとの reconcile が必要になったら —— たとえば独自の再試行を要する
-  NodePolicy ごとの condition —— それは 3 つ目の小さな reconciler であって、ここにある 2 つの
+  NodeNetworkPolicy ごとの condition —— それは 3 つ目の小さな reconciler であって、ここにある 2 つの
   変更ではない。

@@ -21,7 +21,7 @@ var SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 var AddToScheme = SchemeBuilder.AddToScheme
 
 func addKnownTypes(s *runtime.Scheme) error {
-	s.AddKnownTypes(GroupVersion, &NodePolicy{}, &NodePolicyList{})
+	s.AddKnownTypes(GroupVersion, &NodeNetworkPolicy{}, &NodeNetworkPolicyList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 }

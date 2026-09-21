@@ -1,6 +1,6 @@
 // Command cnidaria is the node daemon. One copy runs on every node (a DaemonSet with
 // hostNetwork) and looks after that node only: it writes the CNI conflist, keeps the
-// host-gw routes to the other nodes, and renders NetworkPolicy and NodePolicy into
+// host-gw routes to the other nodes, and renders NetworkPolicy and NodeNetworkPolicy into
 // the node's nftables table (ADR 0001, 0003, 0007).
 package main
 
@@ -64,7 +64,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("kubeconfig: %w", err)
 	}
-	// The core types and the NodePolicy CRD are read through one scheme (ADR 0007).
+	// The core types and the NodeNetworkPolicy CRD are read through one scheme (ADR 0007).
 	scheme := runtime.NewScheme()
 	for _, add := range []func(*runtime.Scheme) error{clientgoscheme.AddToScheme, v1alpha1.AddToScheme} {
 		if err := add(scheme); err != nil {

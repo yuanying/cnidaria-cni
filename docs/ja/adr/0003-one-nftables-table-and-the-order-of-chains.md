@@ -51,8 +51,8 @@ cnidaria が書くものはすべて `inet cnidaria` に置く。テーブルを
 |---|---|---|---|
 | `egress` | forward | `filter`（0） | NetworkPolicy の egress。送信元 Pod をキーにする |
 | `ingress` | forward | `filter + 1` | NetworkPolicy の ingress。宛先 Pod をキーにする |
-| `input` | input | `filter`（0） | NodePolicy の ingress。その前に安全ルール（ADR 0004） |
-| `output` | output | `filter`（0） | NodePolicy の egress。その前に安全ルール（ADR 0004） |
+| `input` | input | `filter`（0） | NodeNetworkPolicy の ingress。その前に安全ルール（ADR 0004） |
+| `output` | output | `filter`（0） | NodeNetworkPolicy の egress。その前に安全ルール（ADR 0004） |
 | `postrouting` | postrouting | `srcnat`（100） | Pod CIDR の外へ出る Pod トラフィックの masquerade |
 
 すべての base chain は `policy accept` である。拒否はディスパッチチェインの末尾の明示的な
@@ -121,7 +121,7 @@ kubelet の probe と `exec` セッションはノード上で発生し、ロー
 ではなく `output` を通って到達する。NetworkPolicy の実装は慣例としてノードが自分の Pod へ
 到達することを許しており、ヘルスチェックがユーザーのポリシーに従属するクラスターとは、
 ポリシーのバグに見える理由で不健全になるクラスターである。`output` チェインが持つのは
-NodePolicy だけである。
+NodeNetworkPolicy だけである。
 
 ### masquerade
 

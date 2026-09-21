@@ -34,7 +34,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
   デーモンは起動を拒否する（ADR 0002）
 - **nftables のテーブルは `inet cnidaria` の 1 つ。** `nft -f` でテーブル単位に不可分に置き換え、
   ruleset 全体を flush しない。kube-proxy のテーブルには触らない（ADR 0003）
-- **NodePolicy CRD は cluster-scoped。** ノードを締め出さない安全ルールはポリシーで消せず、
+- **NodeNetworkPolicy CRD は cluster-scoped。** ノードを締め出さない安全ルールはポリシーで消せず、
   既定は permissive（drop せずログと counter で見せる）で、`Enforce` は明示的に選ぶ（ADR 0004）
 - **IPAM は `host-local`。** ranges は `node.spec.podCIDRs` から書く（ADR 0005）
 - **経路は family ごと。** 相手ノードの InternalIP をネクストホップにし、片方の family が
@@ -60,11 +60,11 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | パス | 責務 |
 |---|---|
 | `cmd/cnidaria` | ノード常駐デーモンの入口。フラグ、Manager の組み立て、シグナル処理 |
-| `internal/apis/v1alpha1` | `NodePolicy` CRD の Go 型。controller-gen が DeepCopy と CRD manifest を生成する |
+| `internal/apis/v1alpha1` | `NodeNetworkPolicy` CRD の Go 型。controller-gen が DeepCopy と CRD manifest を生成する |
 | `internal/conflist` | このノード用の CNI conflist を描画し（純粋関数、golden テスト）、ノードに原子的に書き出す |
 | `internal/routes` | 他ノードの PodCIDR への host-gw 経路を family ごとに保つ |
 | `internal/netpol` | NetworkPolicy v1 の意味論を chain / set のモデルに変換する |
-| `internal/nodepol` | NodePolicy を chain のモデルに変換し、mode に応じた verdict を置く（消せない安全ルールは `internal/nftables` が描画する） |
+| `internal/nodepol` | NodeNetworkPolicy を chain のモデルに変換し、mode に応じた verdict を置く（消せない安全ルールは `internal/nftables` が描画する） |
 | `internal/nftables` | モデルを nft テキストに描画し、`nft -f` で適用する。netns 1 つと nft だけで済む tag `netns` のテストもここに置く |
 | `internal/controller` | controller-runtime の reconciler。経路用と ruleset 用の 2 つ |
 | `internal/sysctl` | 起動時の kernel 設定検査（`br_netfilter`、forwarding） |
