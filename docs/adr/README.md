@@ -8,7 +8,7 @@ under [docs/ja/adr](../ja/adr/README.md).
 | # | Title | Decides |
 |---|---|---|
 | [0001](0001-delegate-the-data-plane-to-the-reference-plugins.md) | Delegate the data plane to the reference CNI plugins | No CNI binary of our own; the daemon writes a conflist naming `bridge`, `host-local`, `portmap`; masquerade is ours |
-| [0002](0002-same-node-pod-traffic-passes-through-br-netfilter.md) | Same-node pod traffic passes through br_netfilter | The sysctls are assumed and checked at start-up; the daemon refuses to start without them |
+| [0002](0002-same-node-pod-traffic-passes-through-br-netfilter.md) | Same-node pod traffic passes through br_netfilter | The br_netfilter sysctls are checked at start-up and the daemon refuses to start without them; IP forwarding the daemon turns on itself |
 | [0003](0003-one-nftables-table-and-the-order-of-chains.md) | One nftables table and the order of chains | `inet cnidaria`, five base chains, egress and ingress as separate base chains, `nft -f` atomic replacement |
 | [0004](0004-node-policy-crd-and-lockout-prevention.md) | NodeNetworkPolicy CRD and lockout prevention | Cluster-scoped CRD shaped like NetworkPolicy, safe rules a policy cannot remove, permissive by default with `Enforce` opted into |
 | [0005](0005-ipam-is-host-local.md) | IPAM is host-local | Ranges from `node.spec.podCIDRs`, state in host-local's file store |

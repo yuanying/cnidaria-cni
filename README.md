@@ -38,15 +38,17 @@ it.
   is no VXLAN, no tunnel, no BGP.
 - **Its own CNI binary or IPAM.** The reference plugins do the per-pod work; cnidaria
   is a node daemon and a conflist. Nothing of cnidaria's runs when a pod starts.
-- **Fix the node for you.** A kernel setting the data plane depends on is a refusal to
-  start, not something the daemon turns on.
+- **Load kernel modules for you.** A missing `br_netfilter`, or its sysctls not at 1, is
+  a refusal to start, not something the daemon turns on. IP forwarding is the one kernel
+  setting it does turn on, as a CNI that routes for its pods commonly does.
 
 ## Requirements
 
 | Requirement | Why |
 |---|---|
 | `br_netfilter` loaded, with `net.bridge.bridge-nf-call-iptables` and `bridge-nf-call-ip6tables` at 1 | Pod traffic that stays on one node is switched by the bridge and reaches the IP filter hooks only through this. The daemon checks it at start-up and refuses to run without it (ADR 0002) |
-| `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` at 1 | The node routes between its bridge and the segment. Checked at start-up like the settings above, with the same refusal to run |
+| Nothing for IP forwarding: the daemon sets `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` to 1 | The node routes between its bridge and the segment. The daemon turns forwarding on at start-up and logs it, and refuses to run only if it cannot write the setting (ADR 0002) |
+| `accept_ra=2`, or a static default route, on an interface that takes its IPv6 default route from router advertisements | With forwarding on, `accept_ra=1` ignores router advertisements and the default route expires. cnidaria does not touch `accept_ra` (ADR 0002) |
 | kube-controller-manager with `--allocate-node-cidrs` and the cluster CIDRs | `node.spec.podCIDRs` is the only source of a node's ranges. For dual stack, one CIDR per family |
 | Every node with an InternalIP of each family in use | A route's next hop is the peer's InternalIP of the same family. A missing family means no routes for that family, logged as a warning (ADR 0006) |
 | All nodes on one L2 segment | Next hops have to be on-link |
@@ -68,8 +70,10 @@ ClusterRoleBinding, all three cluster-scoped, and a ServiceAccount and the Daemo
 `ghcr.io/yuanying/cnidaria-cni`.
 
 The DaemonSet runs with `hostNetwork`, `CAP_NET_ADMIN` and nothing else — not
-privileged — and its init container copies `bridge`, `host-local` and `portmap` into
-`/opt/cni/bin` without disturbing any other plugin the node has.
+privileged. The host's `/proc/sys/net` is mounted writable so that the daemon can turn
+on forwarding; the rest of `/proc/sys` stays read-only. Its init container copies
+`bridge`, `host-local` and `portmap` into `/opt/cni/bin` without disturbing any other
+plugin the node has.
 
 A node is working when its conflist is at `/etc/cni/net.d/10-cnidaria.conflist`,
 `ip route show proto 200` lists the other nodes' pod CIDRs, and the table

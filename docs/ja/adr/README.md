@@ -7,7 +7,7 @@
 | # | 題 | 決めたこと |
 |---|---|---|
 | [0001](0001-delegate-the-data-plane-to-the-reference-plugins.md) | データプレーンはリファレンス CNI プラグインに委譲する | 自前の CNI バイナリは置かない。デーモンが `bridge` / `host-local` / `portmap` を並べた conflist を書く。masquerade は自分で持つ |
-| [0002](0002-same-node-pod-traffic-passes-through-br-netfilter.md) | 同一ノード内の Pod 間トラフィックは br_netfilter を通す | sysctl を前提にして起動時に検査し、満たさなければ起動を拒否する |
+| [0002](0002-same-node-pod-traffic-passes-through-br-netfilter.md) | 同一ノード内の Pod 間トラフィックは br_netfilter を通す | br_netfilter の sysctl を起動時に検査し、満たさなければ起動を拒否する。IP forwarding はデーモンが自分で有効にする |
 | [0003](0003-one-nftables-table-and-the-order-of-chains.md) | nftables のテーブルは 1 つ、チェーンの走る順序 | `inet cnidaria`、base chain 5 本、egress と ingress は別の base chain、`nft -f` で不可分に置換 |
 | [0004](0004-node-policy-crd-and-lockout-prevention.md) | NodeNetworkPolicy CRD と締め出し防止 | NetworkPolicy に似せた cluster-scoped CRD、ポリシーで消せない安全ルール、既定は permissive で `Enforce` は明示的に選ぶ |
 | [0005](0005-ipam-is-host-local.md) | IPAM は host-local | ranges は `node.spec.podCIDRs` から、状態は host-local のファイルストア |
