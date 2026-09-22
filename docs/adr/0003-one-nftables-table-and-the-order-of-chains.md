@@ -1,6 +1,6 @@
 # ADR 0003: One nftables table, `inet cnidaria`, and the order its chains run in
 
-- Status: Accepted (2026-09-19), amended (2026-09-20)
+- Status: Accepted (2026-09-19), amended (2026-09-20, 2026-09-21)
 
 ## Context
 
@@ -22,7 +22,8 @@ the same hook — in one table or in several — run one after another in priori
 `drop` is final. So kube-proxy's `FORWARD` accepting a packet does not stop a cnidaria
 chain from dropping it, and a cnidaria `accept` does not exempt a packet from
 kube-proxy's rules. Nobody has to be first to be effective, and nothing has to be
-inserted into anybody else's chain.
+inserted into anybody else's chain — except that, `drop` being final, a `FORWARD` whose
+policy is `DROP` drops pod traffic whatever cnidaria accepts (see Amendments).
 
 **DNAT happens in `prerouting` before `forward` runs.** kube-proxy's Service
 translation is at priority `dstnat` (-100). By the time a `forward` chain at priority
@@ -40,7 +41,9 @@ traffic that another node forwarded.
 Everything cnidaria writes lives in `inet cnidaria`. It is applied with `nft -f` from a
 file that adds the table, deletes it and declares it again in one transaction, so the
 host never holds half a ruleset and a reapply of the same state is the same operation.
-No other table is read, written or flushed; kube-proxy's are not touched.
+No other table is read, written or flushed; kube-proxy's are not touched. The one
+exception, a chain of cnidaria's own and a jump to it in iptables' `FORWARD`, is under
+Amendments.
 
 The ruleset is a pure function of what the daemon has seen from the API server plus
 this node's identity. Rendering runs no command and reads no kernel state.
@@ -178,3 +181,51 @@ what the renderer does about length. Neither reverses a decision: the first had 
 been written down, and the second was found when a name at the API's own limits turned
 out to make an identifier and a comment that nft refuses, taking the node's whole table
 with them.
+
+**2026-09-21, after running on a node with a container engine.** The owner boundary gets
+one exception. A container engine, a host firewall or a distribution's default can set
+the policy of iptables' `filter` `FORWARD` chain to `DROP`; a common container engine
+does so whenever it starts. That chain is a base chain at the forward hook like
+cnidaria's, and a `drop` is final, so every pod packet that no rule in `FORWARD` accepts
+is dropped, whatever `inet cnidaria` does. The CNI this replaces had a rule of its own
+in `FORWARD` that accepted pod traffic, and when it was removed, pod traffic between
+nodes stopped. Nothing in `inet cnidaria` can undo that: an `accept` there ends only
+its own chain.
+
+So cnidaria keeps, for each family, a chain of its own in the `filter` table,
+`CNIDARIA-FWD`, with one rule that accepts traffic from and one that accepts traffic to
+each of the cluster's pod CIDRs, and one jump to it, with a comment naming cnidaria, at
+the head of `FORWARD`. This is what the other CNIs that route for pods do, each with a
+chain of its own in `FORWARD`.
+
+- **What it touches.** The jump, and its own chain. The chain is replaced with
+  `iptables-restore --noflush`, which empties and refills that one chain in one
+  transaction, so there is no moment at which it is empty. The jump is looked for with
+  `-C` and inserted first only when `-C` says it is missing (exit status 1); any other
+  failure of `-C` is an error to retry, not a reason to insert a second jump. A jump
+  that is there but no longer first is left where it is.
+- **What it does not touch.** The policy of `FORWARD`, any other rule in it, and any other
+  chain or table. Nothing is flushed but `CNIDARIA-FWD`.
+- **When.** The route reconciler (ADR 0006) already reads every Node, so it applies the
+  chain with the routes, on every Node event and every resync. A chain or jump removed
+  behind the daemon's back, as a container engine does when it restarts and rewrites
+  `FORWARD`, comes back within the resync interval.
+- **Which iptables.** iptables has two backends, nft and legacy, and rules written through
+  one are not seen by the other. For each family the daemon uses the one that holds
+  more of kube-proxy's `KUBE-` chains, as kube-proxy's own image and other CNIs decide.
+  A family with no `KUBE-` chains in either follows the other family's choice, since
+  kube-proxy may run single-stack and a node uses one backend for both; with none in
+  either family it is nft, or legacy where only legacy is installed. The choice is made
+  at start-up and logged with its reason. Without iptables at all
+  the daemon refuses to start; the image carries it. The legacy backend needs `NET_RAW`
+  and the node's `/run/xtables.lock`, which the DaemonSet grants.
+- **What it does not change.** Pod policy. The `accept` in `CNIDARIA-FWD` ends only that
+  chain, like any other, so `inet cnidaria`'s `egress` and `ingress` still drop what a
+  NetworkPolicy denies.
+- **What is left behind.** Uninstalling cnidaria does not remove the chain or the jump.
+  They accept only pod traffic and do nothing once there are no pods.
+
+Two alternatives were rejected. Setting the policy of `FORWARD` to `ACCEPT` would override
+a choice the node's owner, or another program, made on purpose. Requiring the node to
+be provisioned so that pod traffic is accepted would leave the pod network one
+container-engine restart away from going down, which is the failure this is for.

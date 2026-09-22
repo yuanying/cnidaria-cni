@@ -1,7 +1,8 @@
 // Package controller holds the controller-runtime reconcilers (ADR 0007): the route
-// reconciler driven by Node events, which also writes this node's conflist, and the
-// ruleset reconciler that every Pod, Namespace, NetworkPolicy and NodeNetworkPolicy event
-// funnels into one recompute of the node's nftables table.
+// reconciler driven by Node events, which also keeps the iptables forward chain and
+// writes this node's conflist, and the ruleset reconciler that every Pod, Namespace,
+// NetworkPolicy and NodeNetworkPolicy event funnels into one recompute of the node's
+// nftables table.
 package controller
 
 import (
@@ -43,6 +44,12 @@ type Routes struct {
 	Kernel interface {
 		Apply([]routes.Route) error
 	}
+	// Forward keeps the iptables chain that accepts traffic from and to every
+	// node's pod CIDRs ahead of a FORWARD policy of DROP; iptables.Forward on a
+	// node (ADR 0003).
+	Forward interface {
+		Apply(ctx context.Context, cidrs []netip.Prefix) error
+	}
 	Conflist Conflist
 }
 
@@ -73,9 +80,10 @@ func (r *Routes) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // Reconcile recomputes the full route set from every Node in the cache and applies
-// it, then writes the conflist from this node's own object. Both steps run even if
-// the other fails, and every failure is returned so that the queue retries with
-// backoff. A success asks to be run again after Resync.
+// it, hands every node's pod CIDRs to the iptables forward chain, then writes the
+// conflist from this node's own object. Each step runs even if another fails, and
+// every failure is returned so that the queue retries with backoff. A success asks to
+// be run again after Resync.
 func (r *Routes) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 
@@ -84,8 +92,11 @@ func (r *Routes) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{}, fmt.Errorf("list nodes: %w", err)
 	}
 	nodes := make([]routes.Node, 0, len(list.Items))
+	var clusterPodCIDRs []netip.Prefix
 	for i := range list.Items {
-		nodes = append(nodes, fromNode(&list.Items[i], log))
+		n := fromNode(&list.Items[i], log)
+		nodes = append(nodes, n)
+		clusterPodCIDRs = append(clusterPodCIDRs, n.PodCIDRs...)
 	}
 
 	set, missing := routes.Compute(r.NodeName, nodes)
@@ -93,12 +104,13 @@ func (r *Routes) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, er
 		log.Info("no route for a family: "+m.String(), "node", m.Node, "family", m.Family)
 	}
 	applyErr := r.Kernel.Apply(set)
+	forwardErr := r.Forward.Apply(ctx, clusterPodCIDRs)
 
 	var writeErr error
 	if i := slices.IndexFunc(nodes, func(n routes.Node) bool { return n.Name == r.NodeName }); i >= 0 {
 		writeErr = r.writeConflist(&nodes[i], log)
 	}
-	if err := errors.Join(applyErr, writeErr); err != nil {
+	if err := errors.Join(applyErr, forwardErr, writeErr); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: Resync}, nil

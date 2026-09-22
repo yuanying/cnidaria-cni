@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/netip"
@@ -34,6 +35,17 @@ func (r *recorder) Apply(set []routes.Route) error {
 	return r.fail
 }
 
+// forwardRecorder stands in for the iptables forward chain and keeps what it was given.
+type forwardRecorder struct {
+	got  []netip.Prefix
+	fail error
+}
+
+func (f *forwardRecorder) Apply(_ context.Context, cidrs []netip.Prefix) error {
+	f.got = cidrs
+	return f.fail
+}
+
 func node(name string, podCIDRs []string, internalIPs ...string) *corev1.Node {
 	n := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -50,12 +62,18 @@ func node(name string, podCIDRs []string, internalIPs ...string) *corev1.Node {
 
 func newReconciler(t *testing.T, kernel *recorder, objs ...client.Object) (*Routes, string) {
 	t.Helper()
+	return newReconcilerWithForward(t, kernel, &forwardRecorder{}, objs...)
+}
+
+func newReconcilerWithForward(t *testing.T, kernel *recorder, forward *forwardRecorder, objs ...client.Object) (*Routes, string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "10-cnidaria.conflist")
 	c := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objs...).Build()
 	return &Routes{
 		Reader:   c,
 		NodeName: "node-a",
 		Kernel:   kernel,
+		Forward:  forward,
 		Conflist: Conflist{Path: path, Name: "cnidaria", Bridge: "cni0", MTU: 1500},
 	}, path
 }
@@ -223,5 +241,43 @@ func TestUplinkMTUReadsTheInterfaceHoldingTheAddress(t *testing.T) {
 func TestUplinkMTUFailsWhenNoInterfaceHoldsTheAddress(t *testing.T) {
 	if _, err := uplinkMTU([]netip.Addr{netip.MustParseAddr("192.0.2.1")}); err == nil {
 		t.Error("uplinkMTU returned nil for an address no interface holds")
+	}
+}
+
+// Every node's pod CIDRs, this node's included, go to the iptables forward chain, so
+// that pod traffic survives a FORWARD policy of DROP (ADR 0003).
+func TestReconcileHandsTheClusterPodCIDRsToTheForwardChain(t *testing.T) {
+	forward := &forwardRecorder{}
+	r, _ := newReconcilerWithForward(t, &recorder{}, forward,
+		node("node-a", []string{"192.0.2.0/24", "2001:db8:a::/64"}, "203.0.113.1"),
+		node("node-b", []string{"198.51.100.0/24"}, "203.0.113.2"),
+	)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	want := []netip.Prefix{
+		netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("2001:db8:a::/64"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+	}
+	if diff := cmp.Diff(want, forward.got, cmp.Comparer(func(a, b netip.Prefix) bool { return a == b })); diff != "" {
+		t.Errorf("CIDRs handed to the forward chain differ (-want +got):\n%s", diff)
+	}
+}
+
+// A forward chain that could not be written comes back as an error for the queue to
+// retry, and the routes are still applied in the same pass.
+func TestReconcileReturnsForwardChainFailures(t *testing.T) {
+	kernel := &recorder{}
+	forward := &forwardRecorder{fail: errors.New("iptables-nft-restore: exit status 4")}
+	r, _ := newReconcilerWithForward(t, kernel, forward,
+		node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"),
+		node("node-b", []string{"198.51.100.0/24"}, "203.0.113.2"),
+	)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{})
+	if err == nil || !strings.Contains(err.Error(), "iptables-nft-restore") {
+		t.Errorf("Reconcile returned %v, want the forward chain's error", err)
+	}
+	if len(kernel.got) != 1 {
+		t.Errorf("kernel got %v, want the route to node-b despite the failure", kernel.got)
 	}
 }

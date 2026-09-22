@@ -1,10 +1,12 @@
 // Command cnidaria is the node daemon. One copy runs on every node (a DaemonSet with
 // hostNetwork) and looks after that node only: it writes the CNI conflist, keeps the
-// host-gw routes to the other nodes, and renders NetworkPolicy and NodeNetworkPolicy into
-// the node's nftables table (ADR 0001, 0003, 0007).
+// host-gw routes to the other nodes, keeps pod traffic past an iptables FORWARD policy
+// of DROP, and renders NetworkPolicy and NodeNetworkPolicy into the node's nftables
+// table (ADR 0001, 0003, 0007).
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/yuanying/cnidaria-cni/internal/apis/v1alpha1"
 	"github.com/yuanying/cnidaria-cni/internal/controller"
+	"github.com/yuanying/cnidaria-cni/internal/iptables"
 	"github.com/yuanying/cnidaria-cni/internal/nftables"
 	"github.com/yuanying/cnidaria-cni/internal/routes"
 	"github.com/yuanying/cnidaria-cni/internal/sysctl"
@@ -103,6 +106,17 @@ func run() error {
 		return err
 	}
 
+	// The forward chain goes through whichever iptables backend kube-proxy uses
+	// on this node; without iptables at all, a FORWARD policy of DROP would take
+	// the pod network down, so that is a refusal to start (ADR 0003).
+	forward, err := iptables.Detect(context.Background(), iptables.Exec{})
+	if err != nil {
+		return err
+	}
+	ctrl.Log.Info("Chose the iptables backends for the forward chain",
+		"iptables", forward.V4, "iptablesReason", forward.V4Reason,
+		"ip6tables", forward.V6, "ip6tablesReason", forward.V6Reason)
+
 	kernel, err := routes.NewKernel()
 	if err != nil {
 		return err
@@ -112,6 +126,7 @@ func run() error {
 		Reader:   mgr.GetCache(),
 		NodeName: *nodeName,
 		Kernel:   kernel,
+		Forward:  forward,
 		Conflist: controller.Conflist{
 			Path:     *conflistPath,
 			Name:     "cnidaria",

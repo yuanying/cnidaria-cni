@@ -1,0 +1,22 @@
+$ iptables-nft-restore -w --noflush
+  *filter
+  :CNIDARIA-FWD - [0:0]
+  -A CNIDARIA-FWD -s 192.0.2.0/24 -j ACCEPT
+  -A CNIDARIA-FWD -d 192.0.2.0/24 -j ACCEPT
+  -A CNIDARIA-FWD -s 198.51.100.0/24 -j ACCEPT
+  -A CNIDARIA-FWD -d 198.51.100.0/24 -j ACCEPT
+  -A CNIDARIA-FWD -s 203.0.113.0/24 -j ACCEPT
+  -A CNIDARIA-FWD -d 203.0.113.0/24 -j ACCEPT
+  COMMIT
+$ iptables-nft -w -t filter -C FORWARD -m comment --comment cnidaria: accept pod traffic ahead of the FORWARD policy -j CNIDARIA-FWD
+$ ip6tables-nft-restore -w --noflush
+  *filter
+  :CNIDARIA-FWD - [0:0]
+  -A CNIDARIA-FWD -s 2001:db8:1::/64 -j ACCEPT
+  -A CNIDARIA-FWD -d 2001:db8:1::/64 -j ACCEPT
+  -A CNIDARIA-FWD -s 2001:db8:2::/64 -j ACCEPT
+  -A CNIDARIA-FWD -d 2001:db8:2::/64 -j ACCEPT
+  -A CNIDARIA-FWD -s 2001:db8:3::/64 -j ACCEPT
+  -A CNIDARIA-FWD -d 2001:db8:3::/64 -j ACCEPT
+  COMMIT
+$ ip6tables-nft -w -t filter -C FORWARD -m comment --comment cnidaria: accept pod traffic ahead of the FORWARD policy -j CNIDARIA-FWD

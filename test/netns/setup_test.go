@@ -14,7 +14,7 @@ import (
 // go test prints "ok" for a package whose only output is a skip reason, so a missing
 // prerequisite fails loudly instead of skipping (ADR 0008).
 func TestMain(m *testing.M) {
-	for _, tool := range []string{"ip", "nft"} {
+	for _, tool := range []string{"ip", "nft", "iptables-nft"} {
 		if _, err := exec.LookPath(tool); err == nil {
 			continue
 		}

@@ -26,12 +26,17 @@ English version: [README.md](README.md)
   ポリシーで消せない安全ルールを持つ。既定は permissive で、drop されるはずのものをログに出して
   数え、`Enforce` を選ぶまで落とさない
 - クラスターの PodCIDR の外へ出る Pod のトラフィックを送信元 NAT する
+- コンテナエンジンやホストのファイアウォールが iptables の `FORWARD` の policy を `DROP` に
+  していても Pod のトラフィックを通す。クラスターの PodCIDR から来るものと PodCIDR へ行く
+  ものを accept する自分のチェインを持ち、`FORWARD` の先頭からそこへ jump する
 
 ## しないこと
 
 - **kube-proxy の置き換え。** Service の負荷分散は、kube-proxy がどちらのモードで動いて
   いようとそのまま。cnidaria のテーブルは kube-proxy のテーブルの隣に置かれ、そこには何も
-  触らず、ruleset 全体を flush することもない
+  触らず、ruleset 全体を flush することもない。自分のテーブルの外に書くのは、iptables の
+  `FORWARD` に置く jump とその先の自分のチェインだけで、`FORWARD` の policy と他のルールは
+  そのままにする（ADR 0003）
 - **オーバーレイ。** ノード同士は 1 つのセグメントで直接届く必要がある。VXLAN もトンネルも
   BGP も無い
 - **自前の CNI バイナリや IPAM。** Pod ごとの作業はリファレンスプラグインが行う。cnidaria は
@@ -52,9 +57,10 @@ English version: [README.md](README.md)
 | 各ノードが、使う family それぞれの InternalIP を持つ | 経路のネクストホップは同じ family の相手ノードの InternalIP。片方の family が無ければその family の経路は入らず、警告が出る（ADR 0006） |
 | 全ノードが同じ L2 セグメント上にある | ネクストホップは on-link でなければならない |
 | kube-proxy（モードは問わない） | Service は kube-proxy の仕事であって cnidaria の仕事ではない。ここにあるものは kube-proxy のテーブル名やチェイン名に依存せず、DNAT が forward hook より前で起きることにだけ依存する。これは iptables モードでも nftables モードでも変わらない（ADR 0003） |
+| iptables の `FORWARD` の policy については不要。`DROP` でもよい | デーモンが自分のチェインで Pod のトラフィックを accept する。iptables の backend（nft か legacy）は kube-proxy の `KUBE-` チェインを持っているほうを使う。それが無い family はもう一方に合わせ、どこにも無ければ nft を使う。選択と理由は起動時にログに出る（ADR 0003） |
 
-ノードに事前に入れておくものは無い。イメージがデーモンと `nft` とリファレンスプラグインを
-運ぶ。
+ノードに事前に入れておくものは無い。イメージがデーモンと `nft` と `iptables` と
+リファレンスプラグインを運ぶ。
 
 ## インストール
 
