@@ -1,6 +1,6 @@
 # ADR 0006: One route per peer node and family, with that node's InternalIP as next hop
 
-- Status: Accepted (2026-09-19)
+- Status: Accepted (2026-09-19), amended (2026-09-21)
 
 ## Context
 
@@ -18,8 +18,10 @@ when a family is missing on one side.
 ### Per family, from InternalIP
 
 For each peer node and each family, the daemon installs
-`<peer podCIDR of that family> via <peer InternalIP of that family>` when both exist,
-and nothing for that family when either is missing.
+`<peer podCIDR of that family> via <peer InternalIP of that family>` when both exist.
+For IPv6, a peer with no IPv6 InternalIP is routed through the address it publishes in
+an annotation instead (next section). When there is still no next hop, nothing is
+installed for that family.
 
 - The next hop is the peer's `InternalIP` of the same family. A route's gateway must be
   on-link, and a node's InternalIP is its address on the cluster segment by definition;
@@ -32,12 +34,40 @@ and nothing for that family when either is missing.
   logged with the node's name, and nothing else changes: `host-gw` is for one segment
   and a node outside it is not reachable by this design.
 
+### IPv6 without an IPv6 InternalIP: the address the node publishes
+
+Kubelet reports one InternalIP unless it is told otherwise, and on a dual-stack cluster
+that is usually the IPv4 one. The node still has an IPv6 address on its segment, but
+the Node object does not say which, so a peer has no next hop for the node's IPv6 pod
+CIDR. flannel met the same gap by having each node publish its own address in an
+annotation, and cnidaria does the same.
+
+- Each daemon looks at its own Node. When it has no IPv6 InternalIP, the daemon takes
+  the interface that holds its IPv4 InternalIP — the one on the cluster segment — and
+  picks an IPv6 address of global scope on it that has settled and is meant to stay:
+  not tentative or failed duplicate detection, not deprecated, not a temporary privacy
+  address. Of several, the lowest, so that the choice does not depend on the order the
+  kernel lists them in. Being on the same interface as the IPv4 InternalIP is what
+  makes it on-link for the peers.
+- It writes that address to the annotation `cnidaria.unstable.cloud/node-ipv6` on its
+  own Node, and removes the annotation when there is no such address or when the Node
+  has an IPv6 InternalIP after all. It patches the Node only when the annotation has
+  to change. The check runs on every reconcile, the timed one included, so a changed
+  address is published without a Node event.
+- A peer's IPv6 next hop is its IPv6 InternalIP when it has one, and the annotated
+  address otherwise. The InternalIP wins because it is what the cluster itself reports.
+
+IPv4 has no such fallback: a node without an IPv4 InternalIP has not been seen in the
+clusters this is for, and adding one would be a layer with nothing to test it against.
+
 ### A missing family is visible, not worked around
 
-A peer that has a pod CIDR of one family but no InternalIP of that family gets no route
-for that family. The daemon logs it at warning level with the node name and the missing
-family, and repeats the warning on every reconcile that finds it unchanged, so it does
-not scroll off. It does not:
+A peer that has a pod CIDR of one family but no address of that family to route
+through — no InternalIP, and for IPv6 no annotation either — gets no route for that
+family. The daemon logs it as a warning with the node name and the missing family,
+and repeats the warning on every reconcile that finds it unchanged, so it does not
+scroll off. logr has no warning level, so the line itself starts with `warning:`. It
+does not:
 
 - fall back to the other family's InternalIP (an IPv4 gateway cannot carry an IPv6 route
   and the reverse is equally meaningless);
@@ -78,12 +108,27 @@ gateway address on `cni0`, and the kernel's connected route for that prefix foll
 
 ## Consequences
 
-- The daemon needs `list` and `watch` on Nodes and nothing else for routing; it never
-  writes a Node.
+- The daemon needs `list` and `watch` on Nodes for routing, and `patch` to publish its
+  own IPv6 address. RBAC cannot narrow the `patch` to the node's own object, since
+  every copy of the daemon shares one role, so each daemon writes only its own Node by
+  construction.
 - The route set and the masquerade set of ADR 0003 are derived from the same Node
   objects in the same reconcile, so the two cannot disagree about which nodes exist.
 - A node that changes its InternalIP (a re-addressed segment) gets its routes replaced
   on the next reconcile, since the next hop is part of what is computed.
 - The netns testbed (ADR 0008) covers the missing-family case by giving one "node" an
   IPv4 InternalIP only and asserting IPv4 reachability, IPv6 unreachability, and the
-  presence of the warning.
+  presence of the warning. It covers the published address by giving such a node an
+  IPv6 address on its uplink as well, and asserting that the node finds it and that
+  pods reach each other over IPv6 through it.
+
+## Amendments
+
+**2026-09-21, found on a running cluster.** Kubelet there reported an IPv4 InternalIP
+only, as it does by default, and the daemon installed no IPv6 route at all: every node
+was a missing family for every other. The first version treated that as a
+configuration to fix on the kubelet side. It is too common a default for that, and the
+CNI being replaced did not need it. Each node now publishes its global IPv6 address in
+an annotation when it has no IPv6 InternalIP, peers route through it, and the daemon
+may patch Nodes to do so. The warning for a family still missing now says `warning:`
+in the line, since it had been an info line like any other.

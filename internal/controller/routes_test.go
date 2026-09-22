@@ -18,21 +18,28 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/yuanying/cnidaria-cni/internal/conflist"
 	"github.com/yuanying/cnidaria-cni/internal/routes"
 )
 
-// recorder stands in for the netlink applier and keeps what it was given.
+// recorder stands in for the netlink side and keeps what it was given. ipv6 is what
+// it reports as the node's global IPv6 address, if valid.
 type recorder struct {
 	got  []routes.Route
 	fail error
+	ipv6 netip.Addr
 }
 
 func (r *recorder) Apply(set []routes.Route) error {
 	r.got = set
 	return r.fail
+}
+
+func (r *recorder) GlobalIPv6(netip.Addr) (netip.Addr, bool, error) {
+	return r.ipv6, r.ipv6.IsValid(), nil
 }
 
 // forwardRecorder stands in for the iptables forward chain and keeps what it was given.
@@ -70,7 +77,7 @@ func newReconcilerWithForward(t *testing.T, kernel *recorder, forward *forwardRe
 	path := filepath.Join(t.TempDir(), "10-cnidaria.conflist")
 	c := fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(objs...).Build()
 	return &Routes{
-		Reader:   c,
+		Client:   c,
 		NodeName: "node-a",
 		Kernel:   kernel,
 		Forward:  forward,
@@ -117,11 +124,11 @@ func TestReconcileAppliesRoutesAndWritesTheConflist(t *testing.T) {
 	}
 }
 
-// The ipam store name reaches the conflist, so that a node migrating from another
-// CNI shares that CNI's leases (ADR 0009).
-func TestReconcileWritesTheIPAMNameIntoTheConflist(t *testing.T) {
+// The network name reaches the conflist, so that a node migrating from another CNI
+// shares that CNI's leases: host-local keys its store by the network name (ADR 0009).
+func TestReconcileWritesTheNetworkNameIntoTheConflist(t *testing.T) {
 	r, path := newReconciler(t, &recorder{}, node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"))
-	r.Conflist.IPAMName = "cbr0"
+	r.Conflist.Name = "cbr0"
 	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -130,7 +137,7 @@ func TestReconcileWritesTheIPAMNameIntoTheConflist(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), `"name": "cbr0"`) {
-		t.Errorf("conflist does not carry the ipam name:\n%s", got)
+		t.Errorf("conflist does not carry the network name:\n%s", got)
 	}
 }
 
@@ -216,9 +223,139 @@ func TestReconcileLogsAMissingFamily(t *testing.T) {
 			t.Fatalf("Reconcile: %v", err)
 		}
 		joined := strings.Join(lines, "\n")
-		if !strings.Contains(joined, "node-b") || !strings.Contains(joined, "IPv6") {
+		if !strings.Contains(joined, "warning") || !strings.Contains(joined, "node-b") || !strings.Contains(joined, "IPv6") {
 			t.Errorf("no warning naming node-b and IPv6 in:\n%s", joined)
 		}
+	}
+}
+
+// A peer whose IPv6 address is only in its annotation is routed through it, as
+// ADR 0006 says, when the Node object is what the reconciler reads.
+func TestReconcileRoutesAPeerThroughItsAnnotatedIPv6(t *testing.T) {
+	kernel := &recorder{}
+	peer := node("node-b", []string{"198.51.100.0/24", "2001:db8:b::/64"}, "203.0.113.2")
+	peer.Annotations = map[string]string{NodeIPv6Annotation: "2001:db8::2"}
+	r, _ := newReconciler(t, kernel, node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"), peer)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	want := routes.Route{Node: "node-b", Dst: netip.MustParsePrefix("2001:db8:b::/64"), Via: netip.MustParseAddr("2001:db8::2")}
+	for _, got := range kernel.got {
+		if got == want {
+			return
+		}
+	}
+	t.Errorf("routes handed to the kernel %v do not include %v", kernel.got, want)
+}
+
+// A link-local address in the annotation is not a next hop: it is on-link on every
+// segment at once and says nothing about which interface. It is ignored, so the peer
+// is a missing family like one with no annotation at all.
+func TestReconcileIgnoresALinkLocalAnnotation(t *testing.T) {
+	kernel := &recorder{}
+	peer := node("node-b", []string{"198.51.100.0/24", "2001:db8:b::/64"}, "203.0.113.2")
+	peer.Annotations = map[string]string{NodeIPv6Annotation: "fe80::2"}
+	r, _ := newReconciler(t, kernel, node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"), peer)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	for _, got := range kernel.got {
+		if got.Dst.Addr().Is6() {
+			t.Errorf("an IPv6 route was installed through a link-local annotation: %v", got)
+		}
+	}
+}
+
+// countPatches wraps the fake client so that a test can tell a write that did not
+// happen from one that changed nothing.
+func countPatches(r *Routes, n *int) {
+	r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			*n++
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			*n++
+			return c.Update(ctx, obj, opts...)
+		},
+	})
+}
+
+func annotationOf(t *testing.T, r *Routes, name string) (string, bool) {
+	t.Helper()
+	var n corev1.Node
+	if err := r.Get(t.Context(), client.ObjectKey{Name: name}, &n); err != nil {
+		t.Fatal(err)
+	}
+	v, ok := n.Annotations[NodeIPv6Annotation]
+	return v, ok
+}
+
+// A node without an IPv6 InternalIP publishes the global IPv6 address of its uplink,
+// so that its peers have a next hop for its IPv6 pod CIDR (ADR 0006).
+func TestReconcilePublishesThisNodesIPv6(t *testing.T) {
+	kernel := &recorder{ipv6: netip.MustParseAddr("2001:db8::1")}
+	r, _ := newReconciler(t, kernel, node("node-a", []string{"192.0.2.0/24", "2001:db8:a::/64"}, "203.0.113.1"))
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got, _ := annotationOf(t, r, "node-a"); got != "2001:db8::1" {
+		t.Errorf("annotation = %q, want 2001:db8::1", got)
+	}
+}
+
+// An annotation that already says the right thing is not written again: every
+// reconcile runs this, and a write is a Node event that runs another reconcile.
+func TestReconcileLeavesAnUnchangedAnnotationAlone(t *testing.T) {
+	kernel := &recorder{ipv6: netip.MustParseAddr("2001:db8::1")}
+	self := node("node-a", []string{"192.0.2.0/24", "2001:db8:a::/64"}, "203.0.113.1")
+	self.Annotations = map[string]string{NodeIPv6Annotation: "2001:db8::1"}
+	r, _ := newReconciler(t, kernel, self)
+	var writes int
+	countPatches(r, &writes)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if writes != 0 {
+		t.Errorf("%d writes to the Node, want none", writes)
+	}
+}
+
+// When the node has no usable global IPv6 address any more, the annotation goes, so
+// that peers stop routing through an address that is gone.
+func TestReconcileRemovesTheAnnotationWhenThereIsNoIPv6(t *testing.T) {
+	self := node("node-a", []string{"192.0.2.0/24", "2001:db8:a::/64"}, "203.0.113.1")
+	self.Annotations = map[string]string{NodeIPv6Annotation: "2001:db8::1", "other": "kept"}
+	r, _ := newReconciler(t, &recorder{}, self)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got, ok := annotationOf(t, r, "node-a"); ok {
+		t.Errorf("annotation is still there: %q", got)
+	}
+	var n corev1.Node
+	if err := r.Get(t.Context(), client.ObjectKey{Name: "node-a"}, &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.Annotations["other"] != "kept" {
+		t.Errorf("another annotation was lost: %v", n.Annotations)
+	}
+}
+
+// A node that has an IPv6 InternalIP is routed through it, so it publishes nothing.
+func TestReconcileDoesNotAnnotateANodeWithAnIPv6InternalIP(t *testing.T) {
+	kernel := &recorder{ipv6: netip.MustParseAddr("2001:db8::1")}
+	r, _ := newReconciler(t, kernel, node("node-a", []string{"192.0.2.0/24", "2001:db8:a::/64"}, "203.0.113.1", "2001:db8::1"))
+	var writes int
+	countPatches(r, &writes)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if writes != 0 {
+		t.Errorf("%d writes to the Node, want none", writes)
+	}
+	if got, ok := annotationOf(t, r, "node-a"); ok {
+		t.Errorf("annotation = %q, want none", got)
 	}
 }
 

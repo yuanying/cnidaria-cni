@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,11 +60,14 @@ func (s *Segment) name(parts ...string) string {
 
 // NodeSpec is what a Node object would say about a node: its pod CIDRs and its
 // InternalIPs. The prefix length on an InternalIP is the segment's, so that the
-// addresses of the other nodes are on-link.
+// addresses of the other nodes are on-link. OtherIPs are addresses the uplink holds
+// that the Node object does not report, such as an IPv6 address on a node whose
+// kubelet reports only its IPv4 one.
 type NodeSpec struct {
 	Name        string
 	PodCIDRs    []netip.Prefix
 	InternalIPs []netip.Prefix
+	OtherIPs    []netip.Prefix
 }
 
 // AddNode creates a node namespace joined to the segment: uplink veth, InternalIPs,
@@ -89,7 +93,7 @@ func (s *Segment) AddNode(t testing.TB, spec NodeSpec) *Node {
 	mustRun(t, "ip", "netns", "exec", s.NS, "ip", "link", "set", segSide, "master", SegmentBridge, "up")
 	n.Exec(t, "ip", "link", "set", "lo", "up")
 	n.Exec(t, "ip", "link", "set", NodeUplink, "up")
-	for _, p := range spec.InternalIPs {
+	for _, p := range append(slices.Clone(spec.InternalIPs), spec.OtherIPs...) {
 		if p.Addr().Is6() {
 			n.Exec(t, "ip", "-6", "addr", "add", p.String(), "dev", NodeUplink, "nodad")
 		} else {

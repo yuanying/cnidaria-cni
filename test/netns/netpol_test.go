@@ -331,3 +331,30 @@ func TestTwoPoliciesOnOnePodAreAnOr(t *testing.T) {
 		reach{"default/far", "default/web", servedPort, testbed.Dropped},
 	)
 }
+
+// Neighbour discovery between two pods on one node is bridged, and br_netfilter hands
+// it to the forward hook like any other IPv6 packet. An egress-isolated pod whose
+// neighbour cache is empty has to get its solicitation past the policy before it can
+// reach an allowed peer at all. ARP is not IP, so IPv4 never met this.
+func TestNeighbourDiscoveryPassesAnIsolatedPod(t *testing.T) {
+	c := newPolicyCluster(t)
+	c.enforce(t, netpol.NetworkPolicy{
+		Namespace: "default", Name: "cli-out", PodSelector: selector("role", "front"),
+		PolicyTypes: []netpol.PolicyType{netpol.PolicyTypeEgress},
+		Egress: []netpol.Rule{{
+			Peers: []netpol.Peer{{PodSelector: selectorPtr("app", "web")}},
+			Ports: []netpol.Port{{Protocol: netpol.ProtocolTCP, Number: servedPort}},
+		}},
+	})
+	cli, web := c.pod(t, "default/cli"), c.pod(t, "default/web")
+	// What warmUp learnt would otherwise carry the connection without a single
+	// solicitation.
+	cli.FlushNeighbours(t)
+	web.FlushNeighbours(t)
+	testbed.Eventually(t, settle, "IPv6 from default/cli to default/web with empty neighbour caches", func() error {
+		if got := cli.Connect(t, web.IP(t, true), servedPort, connectTimeout); got != testbed.Open {
+			return fmt.Errorf("the connection was %s", got)
+		}
+		return nil
+	})
+}

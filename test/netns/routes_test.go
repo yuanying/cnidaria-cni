@@ -108,6 +108,50 @@ func TestAMissingFamilyIsReportedAndNotWorkedAround(t *testing.T) {
 	}
 }
 
+// A node whose Node object has no IPv6 InternalIP still has a global IPv6 address on
+// its uplink. It finds that address and publishes it, and its peers route its IPv6 pod
+// CIDR through it (ADR 0006). The address here is what the node would put into its
+// annotation; the reconciler's round trip through the API is covered by its own
+// unit tests.
+func TestAPeerIsRoutedOverIPv6ThroughTheAddressItPublishes(t *testing.T) {
+	seg := testbed.NewSegment(t)
+	a := seg.AddNode(t, testbed.NodeSpec{
+		Name:        "a",
+		PodCIDRs:    []netip.Prefix{pfx("192.0.2.0/25"), pfx("2001:db8:a::/64")},
+		InternalIPs: []netip.Prefix{pfx("203.0.113.1/24"), pfx("2001:db8::1/64")},
+	})
+	c := seg.AddNode(t, testbed.NodeSpec{
+		Name:        "c",
+		PodCIDRs:    []netip.Prefix{pfx("198.51.100.0/25"), pfx("2001:db8:c::/64")},
+		InternalIPs: []netip.Prefix{pfx("203.0.113.3/24")},
+		OtherIPs:    []netip.Prefix{pfx("2001:db8::3/64")},
+	})
+	a1 := a.AddPod(t, "a1")
+	c1 := c.AddPod(t, "c1")
+
+	published, ok, err := c.Kernel(t).GlobalIPv6(c.InternalIPs[0])
+	if err != nil || !ok || published != addr("2001:db8::3") {
+		t.Fatalf("node c found %s (ok %v, err %v), want 2001:db8::3", published, ok, err)
+	}
+	peerC := c.RoutesNode()
+	peerC.AnnotatedIPv6 = published
+	all := []routes.Node{a.RoutesNode(), peerC}
+	for _, n := range []*testbed.Node{a, c} {
+		set, missing := routes.Compute(n.Name, all)
+		if len(missing) != 0 {
+			t.Errorf("node %s could not route %v", n.Name, missing)
+		}
+		if err := n.Kernel(t).Apply(set); err != nil {
+			t.Fatalf("routes on node %s: %v", n.Name, err)
+		}
+	}
+	if table := routeTable(t, a); !strings.Contains(table, "2001:db8:c::/64 via 2001:db8::3") {
+		t.Errorf("node a has no IPv6 route to node c through its published address\n%s", table)
+	}
+	testbed.Eventually(t, settle, "IPv6 from a pod on node a to a pod on node c", func() error { return a1.Ping(c1.IP(t, true)) })
+	testbed.Eventually(t, settle, "IPv6 from a pod on node c to a pod on node a", func() error { return c1.Ping(a1.IP(t, true)) })
+}
+
 // A pod that sends to a virtual address which the node DNATs back to the same pod
 // must get its packet back through its own bridge port. With br_netfilter (ADR
 // 0002) the DNATed frame stays on the bridge, so this only works with hairpin on

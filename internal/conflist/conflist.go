@@ -16,7 +16,9 @@ const CNIVersion = "1.0.0"
 
 // Params is everything the conflist for one node depends on.
 type Params struct {
-	// Name is the network name. host-local keys its lease directory by it.
+	// Name is the network name. host-local keeps its leases under it
+	// (/var/lib/cni/networks/<Name>), whatever the ipam block says, so naming the
+	// network after a previous CNI's shares that CNI's allocations (ADR 0009).
 	Name string
 	// Bridge is the name of the Linux bridge the pods attach to.
 	Bridge string
@@ -24,11 +26,6 @@ type Params struct {
 	MTU int
 	// PodCIDRs are this node's node.spec.podCIDRs: at most one prefix per family.
 	PodCIDRs []netip.Prefix
-	// IPAMName, when set, is the name host-local keeps its leases under
-	// (/var/lib/cni/networks/<IPAMName>) instead of the network name. Naming the
-	// store of a previous CNI shares its allocations, which is what a migration
-	// without pod restarts needs (ADR 0009). Empty omits the field.
-	IPAMName string
 }
 
 // Render returns the conflist as indented JSON ending with a newline.
@@ -75,7 +72,7 @@ func Render(p Params) ([]byte, error) {
 				IsDefaultGateway: true,
 				HairpinMode:      true,
 				MTU:              p.MTU,
-				IPAM:             hostLocalIPAM{Type: "host-local", Name: p.IPAMName, Ranges: ranges},
+				IPAM:             hostLocalIPAM{Type: "host-local", Ranges: ranges},
 			},
 			portmapPlugin{
 				Type:         "portmap",
@@ -110,7 +107,6 @@ type bridgePlugin struct {
 
 type hostLocalIPAM struct {
 	Type   string             `json:"type"`
-	Name   string             `json:"name,omitempty"`
 	Ranges [][]hostLocalRange `json:"ranges"`
 }
 

@@ -54,6 +54,33 @@ func TestCompute(t *testing.T) {
 			wantMissing: []Missing{{Node: "node-b", Family: "IPv6", PodCIDR: pfx("2001:db8:b::/64")}},
 		},
 		{
+			// Kubelet reports one InternalIP unless told otherwise, so on many
+			// clusters the peer's IPv6 address is only in its annotation.
+			name: "a peer with no IPv6 InternalIP is reached over IPv6 through the address it annotated",
+			nodes: []Node{self, {
+				Name:          "node-b",
+				PodCIDRs:      []netip.Prefix{pfx("198.51.100.0/24"), pfx("2001:db8:b::/64")},
+				InternalIPs:   []netip.Addr{addr("203.0.113.2")},
+				AnnotatedIPv6: addr("2001:db8::2"),
+			}},
+			wantRoutes: []Route{
+				{Node: "node-b", Dst: pfx("198.51.100.0/24"), Via: addr("203.0.113.2")},
+				{Node: "node-b", Dst: pfx("2001:db8:b::/64"), Via: addr("2001:db8::2")},
+			},
+		},
+		{
+			name: "an IPv6 InternalIP wins over the annotated address",
+			nodes: []Node{self, {
+				Name:          "node-b",
+				PodCIDRs:      []netip.Prefix{pfx("2001:db8:b::/64")},
+				InternalIPs:   []netip.Addr{addr("203.0.113.2"), addr("2001:db8::2")},
+				AnnotatedIPv6: addr("2001:db8::22"),
+			}},
+			wantRoutes: []Route{
+				{Node: "node-b", Dst: pfx("2001:db8:b::/64"), Via: addr("2001:db8::2")},
+			},
+		},
+		{
 			name: "a peer with an IPv4 InternalIP but no IPv4 pod CIDR is not a warning",
 			nodes: []Node{self, {
 				Name:        "node-b",
