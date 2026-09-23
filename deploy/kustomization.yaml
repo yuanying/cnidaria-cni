@@ -10,7 +10,9 @@ resources:
   - rbac.yaml
   - daemonset.yaml
 # The tag to deploy. Overriding it is the one edit an installation is expected to
-# make, in an overlay or here; the default matches the Makefile's IMAGE.
+# make, in an overlay or here; the default is the release these manifests belong to.
+# The Makefile's IMAGE defaults to :dev instead, so a local build never takes a
+# release's tag.
 images:
   - name: ghcr.io/yuanying/cnidaria-cni
-    newTag: dev
+    newTag: v0.1.0

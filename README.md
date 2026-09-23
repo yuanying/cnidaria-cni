@@ -74,7 +74,11 @@ That installs five objects: the `NodeNetworkPolicy` CRD, a ClusterRole and a
 ClusterRoleBinding, all three cluster-scoped, and a ServiceAccount and the DaemonSet in
 `kube-system`. The image tag to deploy is the `images:` entry of
 `deploy/kustomization.yaml`, which an overlay can override; images are published to
-`ghcr.io/yuanying/cnidaria-cni`.
+`ghcr.io/yuanying/cnidaria-cni`. The manifests on a release tag point at that release's
+image.
+
+A release is a pushed tag of the form `vX.Y.Z`: the Image workflow builds the image for
+`linux/amd64` and `linux/arm64` and publishes it under the same tag.
 
 The DaemonSet runs with `hostNetwork`, `CAP_NET_ADMIN` and nothing else — not
 privileged. The host's `/proc/sys/net` is mounted writable so that the daemon can turn

@@ -72,7 +72,11 @@ kubectl apply -k deploy
 入るのは 5 つ。`NodeNetworkPolicy` の CRD、ClusterRole、ClusterRoleBinding（この 3 つは
 cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 配るイメージのタグは `deploy/kustomization.yaml` の `images:` で、overlay から上書きできる。
-イメージは `ghcr.io/yuanying/cnidaria-cni` に置かれる。
+イメージは `ghcr.io/yuanying/cnidaria-cni` に置かれる。リリースのタグ上の manifest は、
+そのリリースのイメージを指す。
+
+リリースは `vX.Y.Z` の形のタグを push することで行う。Image workflow が `linux/amd64` と
+`linux/arm64` のイメージをビルドし、同じタグで公開する。
 
 DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。デーモンが
 forwarding を有効にできるよう、ホストの `/proc/sys/net` を書き込み可能でマウントする。
