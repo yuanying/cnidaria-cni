@@ -48,7 +48,7 @@ spec:
         # plugin that is running, where writing over it in place would fail. Whatever
         # else the node has under /opt/cni/bin, flannel's plugin included, is left.
         - name: install-cni-plugins
-          image: ghcr.io/yuanying/cnidaria-cni:dev
+          image: ghcr.io/yuanying/cnidaria-cni:v0.1.0
           command: [sh, -c]
           args:
             - |
@@ -67,7 +67,7 @@ spec:
               mountPath: /host/opt/cni/bin
       containers:
         - name: cnidaria
-          image: ghcr.io/yuanying/cnidaria-cni:dev
+          image: ghcr.io/yuanying/cnidaria-cni:v0.1.0
           # The flags default to what a node needs, except where the kernel settings
           # are: the container's own /proc/sys is read-only, so the daemon is pointed
           # at the host's /proc/sys/net mounted writable below (ADR 0002).
