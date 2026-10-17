@@ -17,26 +17,17 @@ spec:
         app.kubernetes.io/name: cnidaria
     spec:
       hostNetwork: true
-      # A node cannot become Ready before its CNI runs, so the pod has to be scheduled
-      # onto a node the scheduler is otherwise holding back. The DaemonSet controller
-      # adds the not-ready and network-unavailable tolerations itself; they are written
-      # out here so that what the pod depends on is visible in one place.
+      # Pod networking only works on nodes the CNI runs on, so the pod tolerates
+      # every taint, whatever its key or effect: control-plane nodes, nodes an
+      # operator has tainted for their own workloads, and nodes that are not ready.
+      # The last matters when moving from another CNI. Once the old conflist is gone,
+      # the kubelet reports every node NotReady and the node lifecycle controller
+      # adds node.kubernetes.io/not-ready:NoSchedule. The DaemonSet controller only
+      # adds the NoExecute form of that toleration, so without this one the pod is
+      # never scheduled, and the node stays NotReady for want of the CNI it is
+      # waiting on.
       tolerations:
-        - key: node-role.kubernetes.io/control-plane
-          operator: Exists
-          effect: NoSchedule
-        # The legacy name of the control-plane taint. Clusters set up before it was
-        # renamed still put this one on their control-plane nodes, which need a CNI
-        # all the same.
-        - key: node-role.kubernetes.io/master
-          operator: Exists
-          effect: NoSchedule
-        - key: node.kubernetes.io/not-ready
-          operator: Exists
-          effect: NoExecute
-        - key: node.kubernetes.io/network-unavailable
-          operator: Exists
-          effect: NoSchedule
+        - operator: Exists
       priorityClassName: system-node-critical
       nodeSelector:
         kubernetes.io/os: linux
