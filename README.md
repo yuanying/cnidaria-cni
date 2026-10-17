@@ -206,7 +206,8 @@ rest) are left out of the table.
 `make test-netns-docker` builds nodes out of network namespaces and runs the
 integration tests against them in a privileged container. `make image` builds the
 `linux/amd64` and `linux/arm64` image with `docker buildx`. CI runs `lint`,
-`fmt-check`, `vet` and `test`.
+`fmt-check`, `vet` and `test`. Dependency updates arrive as pull requests from
+Renovate, configured in `renovate.json`.
 
 Read [docs/adr](docs/adr/README.md) before changing anything: the decisions there are
 what the code is shaped around, and overturning one starts with a new record.
