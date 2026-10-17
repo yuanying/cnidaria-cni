@@ -1,6 +1,6 @@
 # ADR 0006: One route per peer node and family, with that node's InternalIP as next hop
 
-- Status: Accepted (2026-09-19), amended (2026-09-21)
+- Status: Accepted (2026-09-19), amended (2026-09-21, 2026-10-17)
 
 ## Context
 
@@ -132,3 +132,10 @@ CNI being replaced did not need it. Each node now publishes its global IPv6 addr
 an annotation when it has no IPv6 InternalIP, peers route through it, and the daemon
 may patch Nodes to do so. The warning for a family still missing now says `warning:`
 in the line, since it had been an info line like any other.
+
+**2026-10-17, found on a running cluster.** A network manager restarted on a node and
+deleted every route it had not created, cnidaria's among them. No Node changed, so the
+routes came back only with the timed reconcile, minutes later, and pods across nodes
+could not reach each other until then. A route removed behind the daemon's back is now
+put back as soon as the kernel reports something after which it could be, and the
+timer remains for a loss nothing reports ([ADR 0010](0010-routes-put-back-on-kernel-events.md)).
