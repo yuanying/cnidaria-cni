@@ -1,0 +1,35 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "schedule": ["before 12pm on the first day of the month"],
+  "postUpdateOptions": ["gomodTidy"],
+  "enabledManagers": ["gomod", "dockerfile", "github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions pinned in a Dockerfile ARG behind a '# renovate:' comment, such as the reference CNI plugins.",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "client-go, apimachinery, api, controller-runtime and controller-tools must move together: each controller-runtime and controller-tools minor is built against one Kubernetes minor, and controller-gen generates the CRD and DeepCopy code for it.",
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/controller-runtime", "sigs.k8s.io/controller-tools"],
+      "groupName": "kubernetes"
+    },
+    {
+      "description": "Our own image is raised by hand as part of a release.",
+      "matchPackageNames": ["ghcr.io/yuanying/cnidaria-cni"],
+      "enabled": false
+    },
+    {
+      "description": "A new Go minor (the go directive and the golang image) waits for approval on the dashboard; patches flow as usual.",
+      "matchPackageNames": ["go", "golang"],
+      "matchUpdateTypes": ["major", "minor"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

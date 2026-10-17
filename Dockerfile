@@ -3,6 +3,7 @@
 # The image also carries the reference CNI plugins (bridge, host-local, portmap):
 # cnidaria has no CNI binary of its own (ADR 0001), and the DaemonSet's init container
 # copies these into /opt/cni/bin on the node.
+# renovate: datasource=github-releases depName=containernetworking/plugins
 ARG CNI_PLUGINS_VERSION=v1.9.1
 
 FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS build

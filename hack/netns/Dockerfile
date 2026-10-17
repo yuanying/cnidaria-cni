@@ -8,6 +8,7 @@
 # The image also carries the reference CNI plugins: the testbed attaches pods to a
 # node's bridge through the real bridge / host-local / portmap plugins driven by the
 # real conflist (ADR 0001), not through a stand-in.
+# renovate: datasource=github-releases depName=containernetworking/plugins
 ARG CNI_PLUGINS_VERSION=v1.9.1
 
 FROM golang:1.27-trixie
