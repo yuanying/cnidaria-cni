@@ -57,7 +57,7 @@ func newPolicyCluster(t *testing.T) *policyCluster {
 	all := []routes.Node{a.RoutesNode(), b.RoutesNode()}
 	for _, n := range []*testbed.Node{a, b} {
 		set, _ := routes.Compute(n.Name, all)
-		if err := n.Kernel(t).Apply(set); err != nil {
+		if _, err := n.Kernel(t).Apply(set); err != nil {
 			t.Fatalf("routes on node %s: %v", n.Name, err)
 		}
 	}

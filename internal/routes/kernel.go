@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -22,6 +23,8 @@ const Protocol netlink.RouteProtocol = 200
 // daemon's own on a node, a "node" namespace in the netns tests.
 type Kernel struct {
 	h *netlink.Handle
+	// ns is the namespace Watch subscribes in; nil for the process's own.
+	ns *netns.NsHandle
 }
 
 // NewKernel talks to the namespace the process runs in.
@@ -39,7 +42,7 @@ func NewKernelAt(ns netns.NsHandle) (*Kernel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("routes: netlink: %w", err)
 	}
-	return &Kernel{h: h}, nil
+	return &Kernel{h: h, ns: &ns}, nil
 }
 
 // Close releases the netlink socket.
@@ -50,21 +53,38 @@ func (k *Kernel) Close() { k.h.Close() }
 // destination is not wanted is deleted. Routes without the marker are never
 // candidates for anything (ADR 0006).
 //
+// It returns the wanted routes the table did not already hold with the same next hop
+// and that went in, so that a route put back after it was removed behind the daemon's
+// back can be told apart from one that was there all along.
+//
 // A route that cannot be installed, typically because its gateway is not on-link,
 // does not stop the others. Every failure is returned, each naming its node.
-func (k *Kernel) Apply(want []Route) error {
+func (k *Kernel) Apply(want []Route) ([]Route, error) {
 	existing, err := k.h.RouteListFiltered(netlink.FAMILY_ALL,
 		&netlink.Route{Protocol: Protocol}, netlink.RT_FILTER_PROTOCOL)
 	if err != nil {
-		return fmt.Errorf("routes: list: %w", err)
+		return nil, fmt.Errorf("routes: list: %w", err)
+	}
+	held := make(map[netip.Prefix]netip.Addr, len(existing))
+	for i := range existing {
+		dst, ok := prefixOf(existing[i].Dst)
+		gw, gwOK := netip.AddrFromSlice(existing[i].Gw)
+		if ok && gwOK {
+			held[dst] = gw.Unmap()
+		}
 	}
 
+	var installed []Route
 	var errs []error
 	wanted := make(map[netip.Prefix]bool, len(want))
 	for _, r := range want {
 		wanted[r.Dst] = true
 		if err := k.h.RouteReplace(toNetlink(r)); err != nil {
 			errs = append(errs, fmt.Errorf("routes: install %s: %w", r, err))
+			continue
+		}
+		if via, ok := held[r.Dst]; !ok || via != r.Via {
+			installed = append(installed, r)
 		}
 	}
 	for i := range existing {
@@ -76,7 +96,101 @@ func (k *Kernel) Apply(want []Route) error {
 			errs = append(errs, fmt.Errorf("routes: remove stale %s: %w", dst, err))
 		}
 	}
-	return errors.Join(errs...)
+	return installed, errors.Join(errs...)
+}
+
+// Watch calls changed whenever the kernel reports something after which Apply may
+// have a route to put back, and once as soon as it listens, for whatever happened
+// before. It blocks until ctx is done and then returns nil. A message that could not
+// be read also calls changed, since it may have been one that counts. If the kernel
+// stops reporting altogether — a subscription's socket fails, as it does when it
+// overflows and events are lost — Watch returns an error, since what it was there to
+// notice could now go unnoticed.
+//
+// What counts is decided by reapplyAfterRoute, reapplyAfterLink and reapplyAfterAddr
+// (ADR 0010). changed is called from Watch's own goroutine and should not block.
+func (k *Kernel) Watch(ctx context.Context, changed func()) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// The library reports both a message it could not read, after which it goes on,
+	// and the failure that ends a subscription, after which it closes the channel.
+	trouble := make(chan error, 1)
+	onError := func(err error) {
+		select {
+		case trouble <- err:
+		default:
+		}
+	}
+
+	routeCh := make(chan netlink.RouteUpdate)
+	linkCh := make(chan netlink.LinkUpdate)
+	addrCh := make(chan netlink.AddrUpdate)
+	if err := netlink.RouteSubscribeWithOptions(routeCh, ctx.Done(),
+		netlink.RouteSubscribeOptions{Namespace: k.ns, ErrorCallback: onError}); err != nil {
+		return fmt.Errorf("routes: subscribe to route events: %w", err)
+	}
+	if err := netlink.LinkSubscribeWithOptions(linkCh, ctx.Done(),
+		netlink.LinkSubscribeOptions{Namespace: k.ns, ErrorCallback: onError}); err != nil {
+		return fmt.Errorf("routes: subscribe to link events: %w", err)
+	}
+	if err := netlink.AddrSubscribeWithOptions(addrCh, ctx.Done(),
+		netlink.AddrSubscribeOptions{Namespace: k.ns, ErrorCallback: onError}); err != nil {
+		return fmt.Errorf("routes: subscribe to address events: %w", err)
+	}
+	changed()
+
+	var lastErr error
+	for {
+		reapply, open := false, true
+		select {
+		case <-ctx.Done():
+			return nil
+		case lastErr = <-trouble:
+			reapply = true
+		case u, ok := <-routeCh:
+			reapply, open = ok && reapplyAfterRoute(u), ok
+		case u, ok := <-linkCh:
+			reapply, open = ok && reapplyAfterLink(u), ok
+		case u, ok := <-addrCh:
+			reapply, open = ok && reapplyAfterAddr(u), ok
+		}
+		if !open {
+			if ctx.Err() != nil {
+				return nil
+			}
+			select {
+			case lastErr = <-trouble:
+			default:
+			}
+			return fmt.Errorf("routes: kernel events stopped: %v", lastErr)
+		}
+		if reapply {
+			changed()
+		}
+	}
+}
+
+// reapplyAfterRoute is true for the removal of one of cnidaria's own routes, such as
+// a network manager deleting the routes it did not put in. The kernel reports that
+// for both families, and for IPv6 also when it flushes routes with their interface.
+func reapplyAfterRoute(u netlink.RouteUpdate) bool {
+	return u.Type == unix.RTM_DELROUTE && u.Protocol == Protocol
+}
+
+// reapplyAfterLink is true for a link that is up and has carrier. IPv4 routes through
+// a link that went down are flushed without a report, and the link coming back is
+// the moment they can be put back.
+func reapplyAfterLink(u netlink.LinkUpdate) bool {
+	const up = unix.IFF_UP | unix.IFF_LOWER_UP
+	return u.Header.Type == unix.RTM_NEWLINK && u.Flags&up == up
+}
+
+// reapplyAfterAddr is true for an address of global scope appearing. Removing an
+// address flushes the IPv4 routes whose gateway it made on-link, again without a
+// report, and an address going back on is when they can be put back. Link-local
+// addresses, which every new pod interface gets, are not.
+func reapplyAfterAddr(u netlink.AddrUpdate) bool {
+	return u.NewAddr && u.Scope == unix.RT_SCOPE_UNIVERSE
 }
 
 // GlobalIPv6 returns a global IPv6 address of the interface that holds on, which is

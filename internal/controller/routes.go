@@ -19,16 +19,20 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/yuanying/cnidaria-cni/internal/conflist"
 	"github.com/yuanying/cnidaria-cni/internal/routes"
 )
 
 // Resync is how often the route set is reapplied when no Node changes. A route
-// deleted behind the daemon's back is put back by the next reconcile, and this is
-// what bounds the wait for one (ADR 0006).
+// deleted behind the daemon's back is put back as soon as the kernel reports it
+// (ADR 0010); this is what bounds the wait for a loss the kernel does not report
+// and nothing else gives away (ADR 0006).
 const Resync = 5 * time.Minute
 
 // NodeIPv6Annotation carries a node's global IPv6 address on its Node object when the
@@ -46,11 +50,13 @@ type Routes struct {
 	// NodeName is the node this daemon runs on: its own object is what the conflist
 	// is rendered from, and its own CIDRs get no route.
 	NodeName string
-	// Kernel applies the computed route set and finds this node's global IPv6
-	// address; routes.Kernel on a node.
+	// Kernel applies the computed route set, finds this node's global IPv6
+	// address and says when the routing table may have lost a route; routes.Kernel
+	// on a node.
 	Kernel interface {
-		Apply([]routes.Route) error
+		Apply([]routes.Route) ([]routes.Route, error)
 		GlobalIPv6(on netip.Addr) (netip.Addr, bool, error)
+		Watch(ctx context.Context, changed func()) error
 	}
 	// Forward keeps the iptables chain that accepts traffic from and to every
 	// node's pod CIDRs ahead of a FORWARD policy of DROP; iptables.Forward on a
@@ -75,14 +81,33 @@ type Conflist struct {
 	MTU int
 }
 
-// SetupWithManager registers the reconciler for every Node event under one fixed key.
+// SetupWithManager registers the reconciler for every Node event, and for every
+// time the kernel says a route may be gone (ADR 0010), under one fixed key. The
+// kernel watch runs with the manager; if it stops, so does the manager, and the
+// daemon is restarted rather than left blind to lost routes.
 func (r *Routes) SetupWithManager(mgr ctrl.Manager) error {
+	one := handler.EnqueueRequestsFromMapFunc(
+		func(context.Context, client.Object) []reconcile.Request {
+			return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "routes"}}}
+		})
+	// One pending event is enough: the reconcile reads the table as it is when
+	// it runs, so whatever happens before then is covered by the one waiting.
+	kernelEvents := make(chan event.GenericEvent, 1)
+	watch := manager.RunnableFunc(func(ctx context.Context) error {
+		return r.Kernel.Watch(ctx, func() {
+			select {
+			case kernelEvents <- event.GenericEvent{Object: &corev1.Node{}}:
+			default:
+			}
+		})
+	})
+	if err := mgr.Add(watch); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("routes").
-		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(
-			func(context.Context, client.Object) []reconcile.Request {
-				return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "routes"}}}
-			})).
+		Watches(&corev1.Node{}, one).
+		WatchesRawSource(source.Channel(kernelEvents, one)).
 		Complete(r)
 }
 
@@ -113,7 +138,10 @@ func (r *Routes) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, er
 		// out from the info around it; it repeats on every reconcile (ADR 0006).
 		log.Info("warning: no route for a family: "+m.String(), "node", m.Node, "family", m.Family)
 	}
-	applyErr := r.Kernel.Apply(set)
+	installed, applyErr := r.Kernel.Apply(set)
+	for _, rt := range installed {
+		log.Info("installed a route: "+rt.String(), "node", rt.Node)
+	}
 	forwardErr := r.Forward.Apply(ctx, clusterPodCIDRs)
 
 	var writeErr, annotateErr error

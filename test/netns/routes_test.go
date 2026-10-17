@@ -3,8 +3,12 @@
 package netns
 
 import (
+	"context"
+	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,7 +54,8 @@ func newCluster(t *testing.T) cluster {
 func (c cluster) apply(t *testing.T, n *testbed.Node) ([]routes.Missing, error) {
 	t.Helper()
 	set, missing := routes.Compute(n.Name, c.all)
-	return missing, n.Kernel(t).Apply(set)
+	_, err := n.Kernel(t).Apply(set)
+	return missing, err
 }
 
 func TestPodsReachEachOtherOnOneNodeAndAcrossNodes(t *testing.T) {
@@ -141,7 +146,7 @@ func TestAPeerIsRoutedOverIPv6ThroughTheAddressItPublishes(t *testing.T) {
 		if len(missing) != 0 {
 			t.Errorf("node %s could not route %v", n.Name, missing)
 		}
-		if err := n.Kernel(t).Apply(set); err != nil {
+		if _, err := n.Kernel(t).Apply(set); err != nil {
 			t.Fatalf("routes on node %s: %v", n.Name, err)
 		}
 	}
@@ -228,6 +233,107 @@ func TestApplyIsIdempotentAndOwnsOnlyItsOwnRoutes(t *testing.T) {
 	}
 	testbed.Eventually(t, settle, "IPv4 across nodes after two applies", func() error { return a1.Ping(b1.IP(t, false)) })
 	testbed.Eventually(t, settle, "IPv6 across nodes after two applies", func() error { return b1.Ping(a1.IP(t, true)) })
+}
+
+// A route removed behind the daemon's back is put back as soon as the kernel says so,
+// not on the next timed reconcile (ADR 0010). Two ways of losing it are covered: a
+// network manager deleting the routes it does not know, which the kernel reports,
+// and the uplink going down and up, which takes the IPv4 routes without a report.
+// The node's address is added back after the flap, as a network manager would.
+func TestARouteRemovedBehindTheDaemonsBackIsPutBack(t *testing.T) {
+	cl := newCluster(t)
+	a1 := cl.a.AddPod(t, "a1")
+	b1 := cl.b.AddPod(t, "b1")
+	if _, err := cl.apply(t, cl.b); err != nil {
+		t.Fatal(err)
+	}
+	installed := watchAndApply(t, cl, cl.a)
+
+	want := []string{"192.0.2.128/25 via 203.0.113.2", "2001:db8:b::/64 via 2001:db8::2"}
+	routesBack := func(what string) {
+		t.Helper()
+		testbed.Eventually(t, settle, what, func() error {
+			table := cl.a.Exec(t, "ip", "-4", "route", "show", "proto", "200") +
+				cl.a.Exec(t, "ip", "-6", "route", "show", "proto", "200")
+			for _, w := range want {
+				if !strings.Contains(table, w) {
+					return fmt.Errorf("no %q in\n%s", w, table)
+				}
+			}
+			return nil
+		})
+		testbed.Eventually(t, settle, "IPv4 across nodes "+what, func() error { return a1.Ping(b1.IP(t, false)) })
+		testbed.Eventually(t, settle, "IPv6 across nodes "+what, func() error { return a1.Ping(b1.IP(t, true)) })
+	}
+	routesBack("once the watch has started")
+
+	cl.a.Exec(t, "ip", "route", "del", "192.0.2.128/25", "proto", "200")
+	cl.a.Exec(t, "ip", "-6", "route", "del", "2001:db8:b::/64", "proto", "200")
+	routesBack("after the routes were deleted")
+	testbed.Eventually(t, settle, "the put-back routes reported as installed", func() error {
+		got := installed()
+		for _, dst := range []netip.Prefix{pfx("192.0.2.128/25"), pfx("2001:db8:b::/64")} {
+			if !slices.ContainsFunc(got, func(r routes.Route) bool { return r.Dst == dst }) {
+				return fmt.Errorf("no %s among %v", dst, got)
+			}
+		}
+		return nil
+	})
+
+	cl.a.Exec(t, "ip", "link", "set", testbed.NodeUplink, "down")
+	cl.a.Exec(t, "ip", "link", "set", testbed.NodeUplink, "up")
+	cl.a.Exec(t, "ip", "-6", "addr", "replace", "2001:db8::1/64", "dev", testbed.NodeUplink, "nodad")
+	routesBack("after the uplink went down and up")
+}
+
+// watchAndApply runs what the daemon does on node n in reply to the kernel: every
+// time Watch calls for it, compute and apply the route set. It returns what the
+// applies have reported installed so far. The watch stops when the test ends.
+func watchAndApply(t *testing.T, cl cluster, n *testbed.Node) func() []routes.Route {
+	t.Helper()
+	k := n.Kernel(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	kick := make(chan struct{}, 1)
+	watchErr := make(chan error, 1)
+	go func() {
+		watchErr <- k.Watch(ctx, func() {
+			select {
+			case kick <- struct{}{}:
+			default:
+			}
+		})
+	}()
+
+	var mu sync.Mutex
+	var all []routes.Route
+	applied := make(chan struct{})
+	go func() {
+		defer close(applied)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-kick:
+			}
+			set, _ := routes.Compute(n.Name, cl.all)
+			got, _ := k.Apply(set) // node c's IPv6 route fails; the rest goes in
+			mu.Lock()
+			all = append(all, got...)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-applied
+		if err := <-watchErr; err != nil {
+			t.Errorf("Watch: %v", err)
+		}
+	})
+	return func() []routes.Route {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(all)
+	}
 }
 
 func routeTable(t *testing.T, n *testbed.Node) string {
