@@ -206,8 +206,11 @@ rest) are left out of the table.
 `make test-netns-docker` builds nodes out of network namespaces and runs the
 integration tests against them in a privileged container. `make image` builds the
 `linux/amd64` and `linux/arm64` image with `docker buildx`. CI runs `lint`,
-`fmt-check`, `vet` and `test`. Dependency updates arrive as pull requests from
-Renovate, configured in `renovate.json`.
+`fmt-check`, `generate-check`, `vet` and `test`; `generate-check` fails when the
+DeepCopy methods or the CRD manifest differ from what `make generate` writes.
+Dependency updates arrive as pull requests from Renovate, configured in
+`renovate.json`. When one of them fails `generate-check`, run `make generate` on its
+branch and commit the result.
 
 Read [docs/adr](docs/adr/README.md) before changing anything: the decisions there are
 what the code is shaped around, and overturning one starts with a new record.
