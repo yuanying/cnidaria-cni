@@ -199,8 +199,10 @@ controller-runtime とそのロガーが登録するフラグ（`--kubeconfig`�
 `make help` でターゲットの一覧が出る。`make test` は Go ツールチェインだけで通り、
 `make test-netns-docker` は netns でノードを組んで統合テストを特権コンテナで回す。
 `make image` は `docker buildx` で `linux/amd64` と `linux/arm64` のイメージを作る。
-CI は `lint`、`fmt-check`、`vet`、`test` を回す。
+CI は `lint`、`fmt-check`、`generate-check`、`vet`、`test` を回し、`generate-check` は
+DeepCopy と CRD の manifest が `make generate` の出力とずれていると失敗する。
 依存の更新は Renovate が pull request で出し、設定は `renovate.json` にある。
+その pull request が `generate-check` で落ちたら、そのブランチで `make generate` を実行して結果をコミットする。
 
 何かを変える前に [docs/ja/adr](docs/ja/adr/README.md) を読むこと。そこにある決定を
 前提にコードの形が決まっており、覆すなら新しい記録を書くところから始める。

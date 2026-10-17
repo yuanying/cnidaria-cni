@@ -66,6 +66,21 @@ fmt-check: ## Fail if any file is not gofmt'd.
 		exit 1; \
 	fi
 
+# Dependency bumps (controller-tools, k8s.io) can change what controller-gen writes
+# without touching any input, and the bot that opens those PRs cannot run commands.
+# This catches the drift so a person regenerates and commits it.
+GENERATED := internal/apis deploy/crd
+
+.PHONY: generate-check
+generate-check: generate ## Fail if the generated DeepCopy methods or CRD manifest are stale.
+	@stale="$$(git status --porcelain --untracked-files=all -- $(GENERATED))"; \
+	if [ -n "$$stale" ]; then \
+		echo "Generated files are stale. Run \`make generate\` and commit the result:"; \
+		echo "$$stale" | sed 's/^/  /'; \
+		git --no-pager diff -- $(GENERATED); \
+		exit 1; \
+	fi
+
 .PHONY: vet
 vet: ## Run go vet over every package, including the tagged tests.
 	$(GO) vet ./...

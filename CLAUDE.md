@@ -76,7 +76,7 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 | `test/netns/testbed` | netns テストの共有基盤。セグメント・ノード・Pod の netns を組み、リファレンスプラグインで Pod を bridge に繋ぐ。ノードへの ruleset 適用と、Pod からの到達判定（drop と「誰も聞いていない」の区別を含む）もここ |
 | `hack/netns` | netns テストを回す特権コンテナのイメージと起動スクリプト |
 | `deploy` | kustomize（DaemonSet、RBAC、`crd/` に生成された CRD）。`kubectl apply -k deploy` で入る。配るイメージのタグは `kustomization.yaml` の `images:` |
-| `.github/workflows` | CI（lint / fmt-check / vet / test）と、タグ push でのマルチアーキイメージ公開 |
+| `.github/workflows` | CI（lint / fmt-check / generate-check / vet / test）と、タグ push でのマルチアーキイメージ公開 |
 | `docs/adr`, `docs/ja/adr` | 設計判断の記録（英語が正、日本語を併置） |
 
 ## 開発の進め方
@@ -86,8 +86,9 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 - `make test` は Go ツールチェインだけで通る純粋なユニットテスト。
   root / `CAP_NET_ADMIN` が要るものは build tag `netns` で分離し、`make test-netns`
   （nft と ip がある環境）または `make test-netns-docker`（特権コンテナ）で回す
-- 実装が終わったら `make lint`、`make fmt-check`、`make vet`、`make test` を通すこと。
-  CI もこの 4 つを回す
+- 実装が終わったら `make lint`、`make fmt-check`、`make generate-check`、`make vet`、`make test`
+  を通すこと。CI もこの 5 つを回す。`generate-check` は `make generate` の出力（DeepCopy と CRD）が
+  コミット済みのものとずれていると失敗する
 - 会話は日本語。**コミットメッセージとコード内のものは英語**
 
 ## ドキュメント

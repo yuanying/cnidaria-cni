@@ -18,6 +18,8 @@ jobs:
         run: make lint
       - name: Format check
         run: make fmt-check
+      - name: Generate check
+        run: make generate-check
       - name: Vet
         run: make vet
       - name: Unit tests
