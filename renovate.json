@@ -16,8 +16,8 @@
   ],
   "packageRules": [
     {
-      "description": "client-go, apimachinery, api and controller-runtime must move together: each controller-runtime minor is built against one Kubernetes minor.",
-      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/controller-runtime"],
+      "description": "client-go, apimachinery, api, controller-runtime and controller-tools must move together: each controller-runtime and controller-tools minor is built against one Kubernetes minor, and controller-gen generates the CRD and DeepCopy code for it.",
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/controller-runtime", "sigs.k8s.io/controller-tools"],
       "groupName": "kubernetes"
     },
     {
