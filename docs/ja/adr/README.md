@@ -15,3 +15,4 @@
 | [0007](0007-controller-runtime-for-everything-the-daemon-watches.md) | デーモンが watch するものはすべて controller-runtime | Manager 1 つ、reconciler 2 つ、CRD は controller-gen、kubebuilder の雛形は使わない |
 | [0008](0008-tests-split-by-privilege.md) | テストは必要な権限で分ける | ユニットテストはツールチェインだけで通る。netns テストは build tag の裏に置き特権コンテナで回す |
 | [0009](0009-migration-from-flannel-without-restarting-pods.md) | flannel から Pod を再起動せずに移行する | 同じ `cni0`、経路は宛先ごとに置換、ipam のストアはネットワーク名で共有（`--network-name`）、cnidaria のデプロイ前に前の CNI の conflist を退かす、他人のファイルは消さない |
+| [0010](0010-routes-put-back-on-kernel-events.md) | 経路が消えたとカーネルが知らせたら入れ直す | 自分の経路の削除、リンクの up、global アドレスの追加を netlink で受けたら入れ直す。通知されない消失にはタイマーを残す |

@@ -74,3 +74,42 @@ func TestPickGlobalIPv6(t *testing.T) {
 		})
 	}
 }
+
+// A route set has to be applied again after the kernel reports one of cnidaria's own
+// routes gone, a link coming up or an address of global scope appearing: the first is
+// the only removal it reports, the other two are when an IPv4 route it flushed
+// without a word can be put back. Everything else, including what a pod coming and
+// going generates, is left to the timed reconcile (ADR 0010).
+func TestWhatTheKernelReportsThatCallsForAnApply(t *testing.T) {
+	ours := netlink.Route{Protocol: Protocol}
+	others := netlink.Route{Protocol: unix.RTPROT_STATIC}
+	up := uint32(unix.IFF_UP | unix.IFF_LOWER_UP)
+	cases := []struct {
+		name string
+		got  bool
+		want bool
+	}{
+		{"one of ours deleted", reapplyAfterRoute(netlink.RouteUpdate{Type: unix.RTM_DELROUTE, Route: ours}), true},
+		{"one of ours added", reapplyAfterRoute(netlink.RouteUpdate{Type: unix.RTM_NEWROUTE, Route: ours}), false},
+		{"someone else's deleted", reapplyAfterRoute(netlink.RouteUpdate{Type: unix.RTM_DELROUTE, Route: others}), false},
+		{"a link up with carrier", reapplyAfterLink(linkUpdate(unix.RTM_NEWLINK, up)), true},
+		{"a link up without carrier", reapplyAfterLink(linkUpdate(unix.RTM_NEWLINK, unix.IFF_UP)), false},
+		{"a link down", reapplyAfterLink(linkUpdate(unix.RTM_NEWLINK, 0)), false},
+		{"a link deleted", reapplyAfterLink(linkUpdate(unix.RTM_DELLINK, up)), false},
+		{"a global address added", reapplyAfterAddr(netlink.AddrUpdate{NewAddr: true, Scope: unix.RT_SCOPE_UNIVERSE}), true},
+		{"a link-local address added", reapplyAfterAddr(netlink.AddrUpdate{NewAddr: true, Scope: unix.RT_SCOPE_LINK}), false},
+		{"a global address deleted", reapplyAfterAddr(netlink.AddrUpdate{NewAddr: false, Scope: unix.RT_SCOPE_UNIVERSE}), false},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func linkUpdate(typ uint16, flags uint32) netlink.LinkUpdate {
+	var u netlink.LinkUpdate
+	u.Header.Type = typ
+	u.Flags = flags
+	return u
+}

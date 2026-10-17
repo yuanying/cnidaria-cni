@@ -25,17 +25,24 @@ import (
 	"github.com/yuanying/cnidaria-cni/internal/routes"
 )
 
-// recorder stands in for the netlink side and keeps what it was given. ipv6 is what
-// it reports as the node's global IPv6 address, if valid.
+// recorder stands in for the netlink side and keeps what it was given. installed is
+// what it reports it had to put in, and ipv6 what it reports as the node's global
+// IPv6 address, if valid.
 type recorder struct {
-	got  []routes.Route
-	fail error
-	ipv6 netip.Addr
+	got       []routes.Route
+	installed []routes.Route
+	fail      error
+	ipv6      netip.Addr
 }
 
-func (r *recorder) Apply(set []routes.Route) error {
+func (r *recorder) Apply(set []routes.Route) ([]routes.Route, error) {
 	r.got = set
-	return r.fail
+	return r.installed, r.fail
+}
+
+func (r *recorder) Watch(ctx context.Context, _ func()) error {
+	<-ctx.Done()
+	return nil
 }
 
 func (r *recorder) GlobalIPv6(netip.Addr) (netip.Addr, bool, error) {
@@ -226,6 +233,39 @@ func TestReconcileLogsAMissingFamily(t *testing.T) {
 		if !strings.Contains(joined, "warning") || !strings.Contains(joined, "node-b") || !strings.Contains(joined, "IPv6") {
 			t.Errorf("no warning naming node-b and IPv6 in:\n%s", joined)
 		}
+	}
+}
+
+// A route the kernel did not have, such as one removed behind the daemon's back, is
+// logged with its node when it goes in, so that a route put back leaves a trace
+// (ADR 0010). A reconcile that changes nothing says nothing about routes.
+func TestReconcileLogsTheRoutesItInstalled(t *testing.T) {
+	var lines []string
+	logger := funcr.New(func(prefix, args string) { lines = append(lines, args) }, funcr.Options{})
+	ctx := log.IntoContext(t.Context(), logger)
+
+	kernel := &recorder{installed: []routes.Route{
+		{Node: "node-b", Dst: netip.MustParsePrefix("198.51.100.0/24"), Via: netip.MustParseAddr("203.0.113.2")},
+	}}
+	r, _ := newReconciler(t, kernel,
+		node("node-a", []string{"192.0.2.0/24"}, "203.0.113.1"),
+		node("node-b", []string{"198.51.100.0/24"}, "203.0.113.2"),
+	)
+	if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "installed") || !strings.Contains(joined, "198.51.100.0/24 via 203.0.113.2 (node node-b)") {
+		t.Errorf("no line saying the route to node-b was installed in:\n%s", joined)
+	}
+
+	lines = nil
+	kernel.installed = nil
+	if _, err := r.Reconcile(ctx, ctrl.Request{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if joined := strings.Join(lines, "\n"); strings.Contains(joined, "installed") {
+		t.Errorf("a reconcile that installed nothing logged:\n%s", joined)
 	}
 }
 
