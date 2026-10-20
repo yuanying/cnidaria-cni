@@ -59,9 +59,28 @@ English version: [README.md](README.md)
 | 全ノードが同じ L2 セグメント上にある | ネクストホップは on-link でなければならない |
 | kube-proxy（モードは問わない） | Service は kube-proxy の仕事であって cnidaria の仕事ではない。ここにあるものは kube-proxy のテーブル名やチェイン名に依存せず、DNAT が forward hook より前で起きることにだけ依存する。これは iptables モードでも nftables モードでも変わらない（ADR 0003） |
 | iptables の `FORWARD` の policy については不要。`DROP` でもよい | デーモンが自分のチェインで Pod のトラフィックを accept する。iptables の backend（nft か legacy）は kube-proxy の `KUBE-` チェインを持っているほうを使う。それが無い family はもう一方に合わせ、どこにも無ければ nft を使う。選択と理由は起動時にログに出る（ADR 0003） |
+| [containernetworking/plugins](https://github.com/containernetworking/plugins) v1.0.0 以降のリファレンス CNI プラグイン `bridge`・`host-local`・`portmap`・`loopback` が、コンテナランタイムの CNI バイナリのディレクトリ（既定は `/opt/cni/bin`）にある | conflist は最初の 3 つを名指しし、Pod ごとの作業はすべてそれらが行う。`loopback` は、ランタイムが自分で Pod の `lo` を上げるよう設定されていない限り、ランタイム自身が `lo` を上げるのに使う。cnidaria はこれらを入れない。コンテナランタイムと同じく、ノードのものである（ADR 0001） |
 
-ノードに事前に入れておくものは無い。イメージがデーモンと `nft` と `iptables` と
-リファレンスプラグインを運ぶ。
+リファレンスプラグインのほかに、ノードに事前に入れておくものは無い。イメージがデーモンと
+`nft` と `iptables` を運ぶ。
+
+プラグインは、たいていコンテナランタイムの導入と一緒に入る。入らない場合は、
+containernetworking/plugins のリリースの tarball に 4 つとも入っている。各ノードで、
+ファイル名にそのノードのアーキテクチャ（`amd64` か `arm64`）を入れて次のようにする。
+
+```sh
+VERSION=v1.9.1 ARCH=amd64
+BASE=https://github.com/containernetworking/plugins/releases/download/$VERSION
+curl -fsSLO "$BASE/cni-plugins-linux-$ARCH-$VERSION.tgz"
+curl -fsSLO "$BASE/cni-plugins-linux-$ARCH-$VERSION.tgz.sha256"
+sha256sum -c "cni-plugins-linux-$ARCH-$VERSION.tgz.sha256"
+sudo mkdir -p /opt/cni/bin
+sudo tar -xz -C /opt/cni/bin -f "cni-plugins-linux-$ARCH-$VERSION.tgz"
+```
+
+ディストリビューションのパッケージでもよいが、ランタイムの CNI バイナリのディレクトリが
+パッケージの置き場所を指している必要がある。たとえば Debian と Ubuntu の
+`containernetworking-plugins` は `/usr/lib/cni` の下に置く。
 
 ## インストール
 
@@ -80,8 +99,8 @@ cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 
 DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。デーモンが
 forwarding を有効にできるよう、ホストの `/proc/sys/net` を書き込み可能でマウントする。
-`/proc/sys` のそれ以外は読み取り専用のまま。init container が `bridge` / `host-local` /
-`portmap` を `/opt/cni/bin` にコピーし、ノードにある他のプラグインには手を触れない。
+`/proc/sys` のそれ以外は読み取り専用のまま。`/opt/cni/bin` はマウントしない。そこにある
+プラグインはノードのものであり、cnidaria は入れも置き換えもしない。
 
 ノードが動いている状態とは、conflist が `/etc/cni/net.d/10-cnidaria.conflist` にあり、
 `ip route show proto 200` に他ノードの PodCIDR が並び、テーブル `inet cnidaria` が

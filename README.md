@@ -60,9 +60,28 @@ it.
 | All nodes on one L2 segment | Next hops have to be on-link |
 | kube-proxy, in either mode | Services are its job, not cnidaria's. Nothing here depends on kube-proxy's tables or chains, only on DNAT happening before the forward hook, which both the iptables and the nftables mode do (ADR 0003) |
 | Nothing for iptables' `FORWARD` policy: `DROP` is fine | The daemon accepts pod traffic in a chain of its own, through whichever iptables backend, nft or legacy, holds kube-proxy's `KUBE-` chains; a family without them follows the other, and with none anywhere it is nft. The choice and its reason are logged at start-up (ADR 0003) |
+| The reference CNI plugins `bridge`, `host-local`, `portmap` and `loopback` from [containernetworking/plugins](https://github.com/containernetworking/plugins) v1.0.0 or later, in the container runtime's CNI binary directory (`/opt/cni/bin` by default) | The conflist names the first three, and they do all the per-pod work; the runtime itself uses `loopback` to bring up a pod's `lo` unless it is configured to do that on its own. cnidaria does not install them: like the container runtime, they are the node's (ADR 0001) |
 
-The nodes need nothing installed: the image carries the daemon, `nft`, `iptables` and
-the reference plugins.
+Other than the reference plugins, the nodes need nothing installed: the image carries
+the daemon, `nft` and `iptables`.
+
+The plugins usually come with the container runtime's installation. Where they do not,
+the release tarball of containernetworking/plugins holds all four. On each node, with
+the node's architecture (`amd64` or `arm64`) in the file name:
+
+```sh
+VERSION=v1.9.1 ARCH=amd64
+BASE=https://github.com/containernetworking/plugins/releases/download/$VERSION
+curl -fsSLO "$BASE/cni-plugins-linux-$ARCH-$VERSION.tgz"
+curl -fsSLO "$BASE/cni-plugins-linux-$ARCH-$VERSION.tgz.sha256"
+sha256sum -c "cni-plugins-linux-$ARCH-$VERSION.tgz.sha256"
+sudo mkdir -p /opt/cni/bin
+sudo tar -xz -C /opt/cni/bin -f "cni-plugins-linux-$ARCH-$VERSION.tgz"
+```
+
+A distribution package works as well, provided the runtime's CNI binary directory
+points where the package puts the plugins; Debian's and Ubuntu's
+`containernetworking-plugins`, for instance, installs them under `/usr/lib/cni`.
 
 ## Install
 
@@ -82,9 +101,9 @@ A release is a pushed tag of the form `vX.Y.Z`: the Image workflow builds the im
 
 The DaemonSet runs with `hostNetwork`, `CAP_NET_ADMIN` and nothing else — not
 privileged. The host's `/proc/sys/net` is mounted writable so that the daemon can turn
-on forwarding; the rest of `/proc/sys` stays read-only. Its init container copies
-`bridge`, `host-local` and `portmap` into `/opt/cni/bin` without disturbing any other
-plugin the node has.
+on forwarding; the rest of `/proc/sys` stays read-only. It does not mount
+`/opt/cni/bin`: the plugins there are the node's, and cnidaria neither installs nor
+replaces them.
 
 A node is working when its conflist is at `/etc/cni/net.d/10-cnidaria.conflist`,
 `ip route show proto 200` lists the other nodes' pod CIDRs, and the table
