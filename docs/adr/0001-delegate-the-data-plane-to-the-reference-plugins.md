@@ -1,6 +1,7 @@
 # ADR 0001: Delegate the data plane to the reference CNI plugins, and ship no plugin binary of our own
 
-- Status: Accepted (2026-09-19)
+- Status: Accepted (2026-09-19), amended (2026-10-20): the reference plugins are the
+  node's, and cnidaria no longer installs them
 
 ## Context
 
@@ -93,12 +94,30 @@ table, keyed on the cluster's pod CIDRs (ADR 0003).
 
 - The task's original goal statement listed "a CNI plugin binary". That item is gone; the
   deliverable is the conflist and the daemon. `make build` builds one binary.
-- The reference plugins have to be on every node. The daemon image carries them and the
-  DaemonSet's init container copies them into `/opt/cni/bin`, so a node needs nothing
-  pre-installed beyond a container runtime.
+- The reference plugins have to be on every node, and they are the node's to provide:
+  `bridge`, `host-local` and `portmap` for the conflist, and `loopback`, which the
+  container runtime uses for a pod's `lo`. They are installed with the container
+  runtime, and cnidaria neither carries nor copies them (see Amendments).
 - Pod creation never runs cnidaria code. If the daemon is down, pods still start and get
   addresses; what stops being maintained is routes and policy, and a policy that is not
   yet rendered means traffic to a newly started pod is not filtered until the daemon
   catches up. This is the same failure window every controller-based enforcer has.
 - The netns tests (ADR 0008) exercise the real plugins through the real conflist, not a
   mock of them.
+
+## Amendments
+
+**2026-10-20, found on a running cluster.** The first version had the daemon image
+carry `bridge`, `host-local` and `portmap`, and an init container copy them into
+`/opt/cni/bin`, so that a node would need nothing beyond a container runtime. That did
+not hold. The runtime brings up a pod's `lo` through the `loopback` plugin, which
+cnidaria did not carry, so the nodes needed the plugins installed anyway. And the
+tooling that set the nodes up installed the whole plugin set into the same directory,
+so the two wrote over each other's binaries whenever their versions differed, with the
+version a node ended up with decided by which ran last.
+
+The usual split is that the standard plugins belong to the node, installed with the
+container runtime, and a CNI installs only what is its own. cnidaria has nothing of its
+own to install, so it now installs nothing: the image carries no plugin, the DaemonSet
+has no init container and does not mount `/opt/cni/bin`, and the README lists the
+plugins as a node requirement. The decision itself, C, is unchanged.

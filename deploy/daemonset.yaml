@@ -32,30 +32,6 @@ spec:
       nodeSelector:
         kubernetes.io/os: linux
       serviceAccountName: cnidaria
-      initContainers:
-        # cnidaria has no CNI binary of its own; the reference plugins it names in the
-        # conflist come out of this image (ADR 0001). Only the three the conflist uses
-        # are copied, and each goes to a temporary name first: a rename replaces a
-        # plugin that is running, where writing over it in place would fail. Whatever
-        # else the node has under /opt/cni/bin, flannel's plugin included, is left.
-        - name: install-cni-plugins
-          image: ghcr.io/yuanying/cnidaria-cni:v0.1.0
-          command: [sh, -c]
-          args:
-            - |
-              set -eu
-              for p in bridge host-local portmap; do
-                cp -f "/opt/cni/bin/$p" "/host/opt/cni/bin/.$p.tmp"
-                chmod 0755 "/host/opt/cni/bin/.$p.tmp"
-                mv -f "/host/opt/cni/bin/.$p.tmp" "/host/opt/cni/bin/$p"
-              done
-          securityContext:
-            privileged: false
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: cni-bin
-              mountPath: /host/opt/cni/bin
       containers:
         - name: cnidaria
           image: ghcr.io/yuanying/cnidaria-cni:v0.1.0
@@ -118,15 +94,11 @@ spec:
             - name: xtables-lock
               mountPath: /run/xtables.lock
       volumes:
-        # The conflist the daemon writes for this node. /opt/cni/bin is the init
-        # container's and is not mounted into the daemon, which never reads it.
+        # The conflist the daemon writes for this node. The plugins it names are the
+        # node's, under /opt/cni/bin, which nothing here mounts (ADR 0001).
         - name: cni-conf
           hostPath:
             path: /etc/cni/net.d
-            type: DirectoryOrCreate
-        - name: cni-bin
-          hostPath:
-            path: /opt/cni/bin
             type: DirectoryOrCreate
         # The pod shares the host's network namespace, so this is the node's own
         # forwarding the daemon turns on.

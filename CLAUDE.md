@@ -29,7 +29,8 @@ flannel が持たない NetworkPolicy の enforce と、ノード自身を守る
 ## 前提となる決定（ADR の要約）
 
 - **自前の CNI バイナリは置かない。** デーモンが `bridge` / `host-local` / `portmap` を並べた
-  conflist をノードに書き、Pod ごとの作業はリファレンスプラグインが行う（ADR 0001）
+  conflist をノードに書き、Pod ごとの作業はリファレンスプラグインが行う。プラグイン自体は
+  ノードのもので、イメージに同梱せず `/opt/cni/bin` にも入れない（ADR 0001）
 - **`br_netfilter` を前提にする。** `bridge-nf-call-iptables` / `ip6tables` が 1 でなければ
   デーモンは起動を拒否する（ADR 0002）
 - **nftables のテーブルは `inet cnidaria` の 1 つ。** `nft -f` でテーブル単位に不可分に置き換え、
