@@ -24,3 +24,5 @@ jobs:
         run: make vet
       - name: Unit tests
         run: make test
+      - name: Release script tests
+        run: .github/release/release_test.sh
