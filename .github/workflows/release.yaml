@@ -1,0 +1,77 @@
+name: Release
+
+# Once a week, releases the next patch version when everything since the latest vX.Y.Z
+# tag is Renovate's and it changed what the image or the manifests are made of. A change
+# of a person's is left to be released by hand; with nothing to release, the run ends
+# after the plan job. .github/release/next-version.sh decides, and logs why.
+#
+# The image is pushed by image.yaml before the annotated tag is created, so a failed
+# build leaves no tag behind. A tag pushed by hand still publishes through image.yaml as
+# before. No GitHub Release is created, as with the tags pushed by hand.
+on:
+  schedule:
+    - cron: "0 0 * * 1" # Monday 09:00 JST
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # What the image is built from (the Dockerfile copies the whole checkout, but only
+      # these reach the binary) and the manifests a tag hands out.
+      - id: next
+        run: |
+          version="$(.github/release/next-version.sh Dockerfile go.mod go.sum cmd internal deploy)"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "next version: ${version:-none}"
+
+  image:
+    needs: plan
+    if: needs.plan.outputs.version != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/image.yaml
+    with:
+      version: ${{ needs.plan.outputs.version }}
+
+  tag:
+    needs: [plan, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # An annotated tag, as the ones pushed by hand, on the commit the image was built
+      # from: github.sha is the same in every job of this run.
+      - name: Create the tag
+        run: |
+          message="$(.github/release/tag-message.sh "$VERSION")"
+          echo "$message"
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$VERSION" -f object="$GITHUB_SHA" -f type=commit -f message="$message" \
+            -f 'tagger[name]=github-actions[bot]' \
+            -f 'tagger[email]=41898282+github-actions[bot]@users.noreply.github.com' \
+            --jq .sha)"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$object"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
