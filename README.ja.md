@@ -95,7 +95,9 @@ cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 そのリリースのイメージを指す。
 
 リリースは `vX.Y.Z` の形のタグを push することで行う。Image workflow が `linux/amd64` と
-`linux/arm64` のイメージをビルドし、同じタグで公開する。
+`linux/arm64` のイメージをビルドし、同じタグで公開する。CI が通った `main` への push も
+`:main` として公開する。これはデプロイ用ではなく、脆弱性のスキャンのためである。イメージには
+`org.opencontainers.image.source` と `org.opencontainers.image.revision` のラベルが付く（ADR 0011）。
 
 DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。デーモンが
 forwarding を有効にできるよう、ホストの `/proc/sys/net` を書き込み可能でマウントする。

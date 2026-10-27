@@ -26,3 +26,44 @@ jobs:
         run: make test
       - name: Release script tests
         run: .github/release/release_test.sh
+
+  # Once the checks pass on main, the image is published as :main, a tag that moves with
+  # every push. A vulnerability scanner reads it, and the revision label on it, to tell a
+  # fix that is on main but not yet released from one that is not made at all (ADR 0011).
+  # The publishing is image.yaml's, as for a release, so the architectures and the labels
+  # are the same. Pushes that queue up are taken one at a time, so an older commit never
+  # overwrites a newer one.
+  image:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: image-main
+      cancel-in-progress: false
+    uses: ./.github/workflows/image.yaml
+    with:
+      version: main
+
+  # Each push of :main leaves the previous one untagged. This deletes the untagged images;
+  # a tagged one is never touched. The action knows a multi-architecture image: the
+  # platform manifests and attestations an index refers to are kept with it, though they
+  # look untagged themselves. Images younger than an hour are left, so that the platform
+  # manifests of a push still in progress, which no index refers to yet, survive. The
+  # action is not safe to run twice at once on one package, hence the group. Deleted
+  # versions are logged by id and can be restored through the API for 30 days.
+  cleanup:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    concurrency:
+      group: image-cleanup
+      cancel-in-progress: false
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          delete-untagged: true
+          older-than: 1 hour
+          validate: true

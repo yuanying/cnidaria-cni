@@ -97,7 +97,10 @@ ClusterRoleBinding, all three cluster-scoped, and a ServiceAccount and the Daemo
 image.
 
 A release is a pushed tag of the form `vX.Y.Z`: the Image workflow builds the image for
-`linux/amd64` and `linux/arm64` and publishes it under the same tag.
+`linux/amd64` and `linux/arm64` and publishes it under the same tag. Every push to
+`main` that passes CI is also published as `:main`, for vulnerability scanning rather
+than for deployment; the images carry the `org.opencontainers.image.source` and
+`org.opencontainers.image.revision` labels (ADR 0011).
 
 The DaemonSet runs with `hostNetwork`, `CAP_NET_ADMIN` and nothing else — not
 privileged. The host's `/proc/sys/net` is mounted writable so that the daemon can turn
