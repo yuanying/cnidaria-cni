@@ -20,6 +20,11 @@ BIN ?= bin/cnidaria
 IMAGE ?= ghcr.io/yuanying/cnidaria-cni:dev
 PLATFORMS ?= linux/amd64,linux/arm64
 PUSH ?=
+# OCI labels on the image config. The source links the package to this repository and
+# tells a scanner where the code is; the revision is the commit the image was built from,
+# which is how a scanner tells whether :main already carries a fix.
+IMAGE_SOURCE ?= https://github.com/yuanying/cnidaria-cni
+IMAGE_REVISION ?= $(shell git rev-parse HEAD)
 
 # `kustomize` is not required: kubectl bundles the same build command.
 KUSTOMIZE ?= kubectl kustomize
@@ -45,7 +50,10 @@ generate: ## Regenerate DeepCopy methods and the CRD manifest from internal/apis
 
 .PHONY: image
 image: ## Build the multi-architecture container image with docker buildx.
-	docker buildx build --platform $(PLATFORMS) -t $(IMAGE) $(if $(PUSH),--push,) .
+	docker buildx build --platform $(PLATFORMS) -t $(IMAGE) \
+		--label org.opencontainers.image.source=$(IMAGE_SOURCE) \
+		--label org.opencontainers.image.revision=$(IMAGE_REVISION) \
+		$(if $(PUSH),--push,) .
 
 .PHONY: kustomize
 kustomize: ## Render the deployment manifests from deploy/.

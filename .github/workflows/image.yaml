@@ -4,7 +4,8 @@ name: Image
 # holds, under the branch name, which is how a pre-release image gets onto a cluster.
 # release.yaml calls this with a version as well: a tag pushed by its GITHUB_TOKEN starts
 # no workflow, so it publishes the image itself, from the commit it is about to tag,
-# before the tag exists.
+# before the tag exists. ci.yaml calls it with main once the checks pass on a push to
+# main, which keeps :main on the latest commit (ADR 0011).
 #
 # A pull request builds the image without pushing it, so that an update Renovate merges
 # by itself (a base image, the Go toolchain) is known to still build for both
@@ -17,7 +18,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: The version to publish the image as (v1.2.3).
+        description: The tag to publish the image as (v1.2.3, or main).
         type: string
         required: true
 
@@ -39,8 +40,8 @@ jobs:
       - name: Build
         run: make image IMAGE=cnidaria-cni:test
 
-  # In a called run, github.event_name is the caller's (schedule or workflow_dispatch),
-  # so this runs for release.yaml too.
+  # In a called run, github.event_name is the caller's (schedule, workflow_dispatch or
+  # push), so this runs for release.yaml and ci.yaml too.
   push:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -58,6 +59,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Through the Makefile, so that the architectures are decided in one place.
+      # Through the Makefile, so that the architectures and the labels are decided in
+      # one place.
       - name: Build and push
         run: make image IMAGE=ghcr.io/${{ github.repository }}:${{ inputs.version || github.ref_name }} PUSH=1
