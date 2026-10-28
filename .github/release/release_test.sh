@@ -9,6 +9,7 @@ dirs=()
 trap 'rm -rf "${dirs[@]}"' EXIT
 
 renovate='renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>'
+responder='fraction-vuln-responder[bot] <348762456+fraction-vuln-responder[bot]@users.noreply.github.com>'
 
 # Makes an empty repository in a new directory and prints its path.
 repo() {
@@ -33,6 +34,16 @@ at() { (cd "$1" && shift && git "$@"); }
 expect() { # expect <description> <want> <dir>
   local got
   got="$(cd "$3" && "$here/next-version.sh" Dockerfile go.mod go.sum cmd internal deploy 2>/dev/null)" || got="(failed)"
+  if [ "$got" = "$2" ]; then echo "ok   - $1"; else echo "FAIL - $1: want '$2', got '$got'" >&2; failed=1; fi
+}
+expect_reason() { # expect_reason <description> <text the reason must contain> <dir>
+  local got
+  got="$(cd "$3" && "$here/next-version.sh" Dockerfile go.mod go.sum cmd internal deploy 2>&1 >/dev/null)" || true
+  if [[ "$got" == *"$2"* ]]; then echo "ok   - $1"; else echo "FAIL - $1: want '$2' in '$got'" >&2; failed=1; fi
+}
+tag_message() { # tag_message <description> <want> <dir> <version>
+  local got
+  got="$(cd "$3" && "$here/tag-message.sh" "$4" 2>/dev/null)" || got="(failed)"
   if [ "$got" = "$2" ]; then echo "ok   - $1"; else echo "FAIL - $1: want '$2', got '$got'" >&2; failed=1; fi
 }
 
@@ -72,11 +83,37 @@ commit "$d" "$renovate" go.mod b
 at "$d" checkout -q -b renovate/golang; commit "$d" "$renovate" Dockerfile b; at "$d" checkout -q main
 at "$d" merge -q --no-ff -m "Merge pull request #1 from yuanying/renovate/golang" renovate/golang
 want="$(printf '%s\n' "cnidaria-cni v0.1.3" "" "Dependency updates by Renovate:" "" "- update go.mod" "- update Dockerfile")"
-got="$(cd "$d" && "$here/tag-message.sh" v0.1.3 2>/dev/null)" || got="(failed)"
-if [ "$got" = "$want" ]; then
-  echo "ok   - the tag message lists Renovate's subjects since the latest tag, without merges"
+tag_message "the tag message lists Renovate's subjects since the latest tag, without merges" "$want" "$d" v0.1.3
+
+# fraction-vuln-responder's commits count as Renovate's do.
+d="$(repo)"; dirs+=("$d")
+commit "$d" "$user" go.mod a; at "$d" tag -a -m t v0.1.2
+at "$d" checkout -q -b vuln-responder/go-net; commit "$d" "$responder" go.sum b; at "$d" checkout -q main
+at "$d" merge -q --no-ff -m "Merge pull request #2 from yuanying/vuln-responder/go-net" vuln-responder/go-net
+expect "fraction-vuln-responder alone changed go.sum: the next patch" "v0.1.3" "$d"
+
+commit "$d" "$renovate" Dockerfile b
+expect "fraction-vuln-responder's and Renovate's commits mixed: the next patch" "v0.1.3" "$d"
+want="$(printf '%s\n' "cnidaria-cni v0.1.3" "" "Updates by Renovate and fraction-vuln-responder:" "" "- update go.sum" "- update Dockerfile")"
+tag_message "the tag message names fraction-vuln-responder when it has commits" "$want" "$d" v0.1.3
+
+commit "$d" "$user" internal/routes/routes.go b
+expect "a person's commit among fraction-vuln-responder's: nothing" "" "$d"
+blocking="$(at "$d" log -1 --format='%h test update internal/routes/routes.go')"
+expect_reason "the reason lists the person's commit that stops the release" "$blocking" "$d"
+expect_reason "the reason introduces the commits that stop the release" "commits by others than the bots:" "$d"
+got="$(cd "$d" && "$here/next-version.sh" Dockerfile go.mod go.sum cmd internal deploy 2>&1 >/dev/null)" || true
+if [[ "$got" == *"update go.sum"* || "$got" == *"update Dockerfile"* ]]; then
+  echo "FAIL - the bots' commits are listed among those that stop the release: '$got'" >&2; failed=1
 else
-  echo "FAIL - tag message: want '$want', got '$got'" >&2; failed=1
+  echo "ok   - the bots' commits are not listed among those that stop the release"
 fi
+expect_reason "the reason gives the command to release by hand" \
+  "git tag -a v0.1.3 -m 'cnidaria-cni v0.1.3' $(at "$d" rev-parse HEAD) && git push origin v0.1.3" "$d"
+
+d="$(repo)"; dirs+=("$d")
+commit "$d" "$user" go.mod a; at "$d" tag -a -m t v0.1.2
+commit "$d" "fraction-vuln-responder <someone@example.com>" go.mod b
+expect "a look-alike author without [bot] is a person: nothing" "" "$d"
 
 exit "$failed"
