@@ -38,7 +38,7 @@ jobs:
       # The daemon is cross-compiled, but the arm64 half of the image installs
       # packages for that architecture, so the runner needs the emulator.
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build
         run: make image IMAGE=cnidaria-cni:test
 
@@ -55,7 +55,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
