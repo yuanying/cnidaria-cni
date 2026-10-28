@@ -9,7 +9,9 @@ name: Image
 #
 # A pull request builds the image without pushing it, so that an update Renovate merges
 # by itself (a base image, the Go toolchain) is known to still build for both
-# architectures. Only the publishing job holds the package write permission.
+# architectures. Only the publishing job holds the package write permission. A called run
+# always publishes, even when the caller runs on a pull request (release.yaml on the
+# merge of a vuln-responder/ branch): the version input is what tells them apart.
 on:
   pull_request:
   push:
@@ -27,7 +29,7 @@ permissions:
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,10 +42,10 @@ jobs:
       - name: Build
         run: make image IMAGE=cnidaria-cni:test
 
-  # In a called run, github.event_name is the caller's (schedule, workflow_dispatch or
-  # push), so this runs for release.yaml and ci.yaml too.
+  # In a called run, github.event_name is the caller's (schedule, workflow_dispatch,
+  # push or pull_request), so this is decided by the version input too.
   push:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || inputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read

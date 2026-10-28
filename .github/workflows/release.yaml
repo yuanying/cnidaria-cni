@@ -1,9 +1,17 @@
 name: Release
 
 # Once a week, releases the next patch version when everything since the latest vX.Y.Z
-# tag is Renovate's and it changed what the image or the manifests are made of. A change
-# of a person's is left to be released by hand; with nothing to release, the run ends
-# after the plan job. .github/release/next-version.sh decides, and logs why.
+# tag is Renovate's or fraction-vuln-responder's and it changed what the image or the
+# manifests are made of. A change of a person's is left to be released by hand; with
+# nothing to release, the run ends after the plan job. .github/release/next-version.sh
+# decides, and the job summary says why (ADR 0012).
+#
+# The same release is tried as soon as a pull request from a vuln-responder/ branch is
+# merged into main: a fix of a vulnerability should not wait for Monday. The decision is
+# the same, so a person's commit since the latest tag stops it as well; the summary then
+# lists those commits and the command to release by hand. The weekly run stays as the
+# fallback for one that failed. Both share the concurrency group, so they never run at
+# once, and the later of two sees the tag the earlier created.
 #
 # The image is pushed by image.yaml before the annotated tag is created, so a failed
 # build leaves no tag behind. A tag pushed by hand still publishes through image.yaml as
@@ -12,6 +20,9 @@ on:
   schedule:
     - cron: "0 0 * * 1" # Monday 09:00 JST
   workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions: {}
 
@@ -20,8 +31,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # For the pull request, github.sha is the commit the merge made on main, and every job,
+  # image.yaml's included, checks out and tags that commit.
   plan:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged
+      && startsWith(github.event.pull_request.head.ref, 'vuln-responder/')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      || github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,9 +54,21 @@ jobs:
       # these reach the binary) and the manifests a tag hands out.
       - id: next
         run: |
-          version="$(.github/release/next-version.sh Dockerfile go.mod go.sum cmd internal deploy)"
+          status=0
+          version="$(.github/release/next-version.sh Dockerfile go.mod go.sum cmd internal deploy 2>"$RUNNER_TEMP/reason")" || status=$?
+          cat "$RUNNER_TEMP/reason" >&2
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "next version: ${version:-none}"
+          {
+            echo "## Next version: ${version:-none}"
+            if [ -s "$RUNNER_TEMP/reason" ]; then
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/reason"
+              echo '```'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   image:
     needs: plan
