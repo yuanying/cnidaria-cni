@@ -1,10 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":dependencyDashboard"],
+  "description": "The patch, digest and pinning updates Renovate merges wait for the pull request's checks: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures",
+  "extends": ["github>yuanying/renovate-config", "github>yuanying/renovate-config:automerge-patch"],
   "schedule": ["before 12pm on the first day of the month"],
   "postUpdateOptions": ["gomodTidy"],
   "enabledManagers": ["gomod", "dockerfile", "github-actions", "custom.regex"],
-  "platformAutomerge": false,
   "customManagers": [
     {
       "customType": "regex",
@@ -31,11 +31,6 @@
       "matchPackageNames": ["go", "golang"],
       "matchUpdateTypes": ["major", "minor"],
       "dependencyDashboardApproval": true
-    },
-    {
-      "description": "Patch, digest and pinning updates are merged by Renovate itself once the pull request's checks pass: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures. platformAutomerge is off so that the merge waits for those checks without relying on the repository's auto-merge setting or branch protection. Minor and major updates only open a pull request",
-      "matchUpdateTypes": ["patch", "digest", "pin", "pinDigest"],
-      "automerge": true
     }
   ]
 }
