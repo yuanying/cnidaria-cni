@@ -102,6 +102,11 @@ A release is a pushed tag of the form `vX.Y.Z`: the Image workflow builds the im
 than for deployment; the images carry the `org.opencontainers.image.source` and
 `org.opencontainers.image.revision` labels (ADR 0011).
 
+Patch versions are also released automatically, when every commit since the latest
+release is a bot's: weekly for Renovate's dependency updates, and as soon as a
+vulnerability fix from a `vuln-responder/` branch is merged (ADR 0012). Anything a
+person changed is released by hand.
+
 The DaemonSet runs with `hostNetwork`, `CAP_NET_ADMIN` and nothing else — not
 privileged. The host's `/proc/sys/net` is mounted writable so that the daemon can turn
 on forwarding; the rest of `/proc/sys` stays read-only. It does not mount
