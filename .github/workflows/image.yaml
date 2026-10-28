@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'pull_request' && inputs.version == ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # The daemon is cross-compiled, but the arm64 half of the image installs
@@ -51,7 +51,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: docker/setup-qemu-action@v3
