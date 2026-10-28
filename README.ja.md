@@ -99,6 +99,10 @@ cluster-scoped）、そして `kube-system` の ServiceAccount と DaemonSet。
 `:main` として公開する。これはデプロイ用ではなく、脆弱性のスキャンのためである。イメージには
 `org.opencontainers.image.source` と `org.opencontainers.image.revision` のラベルが付く（ADR 0011）。
 
+最新のリリース以降のコミットがすべて bot のものなら、パッチ版は自動でもリリースされる。
+Renovate の依存の更新は週次で、`vuln-responder/` のブランチからの脆弱性の直しはマージされたら
+すぐに出す（ADR 0012）。人が変えたものは手でリリースする。
+
 DaemonSet は `hostNetwork` と `CAP_NET_ADMIN` だけで動く（privileged ではない）。デーモンが
 forwarding を有効にできるよう、ホストの `/proc/sys/net` を書き込み可能でマウントする。
 `/proc/sys` のそれ以外は読み取り専用のまま。`/opt/cni/bin` はマウントしない。そこにある

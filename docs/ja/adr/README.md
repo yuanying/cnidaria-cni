@@ -17,3 +17,4 @@
 | [0009](0009-migration-from-flannel-without-restarting-pods.md) | flannel から Pod を再起動せずに移行する | 同じ `cni0`、経路は宛先ごとに置換、ipam のストアはネットワーク名で共有（`--network-name`）、cnidaria のデプロイ前に前の CNI の conflist を退かす、他人のファイルは消さない |
 | [0010](0010-routes-put-back-on-kernel-events.md) | 経路が消えたとカーネルが知らせたら入れ直す | 自分の経路の削除、リンクの up、global アドレスの追加を netlink で受けたら入れ直す。通知されない消失にはタイマーを残す |
 | [0011](0011-main-image-for-tracking-fixes.md) | main の先頭を :main として公開する | main で CI が通ったら `:main` を push する。ビルドはリリースと同じ。すべてのイメージに source と revision のラベルを付ける。untagged の版は、マルチアーキのイメージを壊さない Action で消す |
+| [0012](0012-release-vulnerability-fixes-at-once.md) | 脆弱性の直しはマージしたらすぐリリースする | `vuln-responder/` の pull request のマージで、すぐに次のパッチ版を出す。判定は週次と同じで fraction-vuln-responder を Renovate と同じに数える。人のコミットがあれば止め、手で出す方法を summary に書く |
