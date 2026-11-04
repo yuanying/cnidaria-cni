@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "The patch, digest and pinning updates Renovate merges wait for the pull request's checks: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures",
-  "extends": ["github>yuanying/renovate-config", "github>yuanying/renovate-config:automerge-patch"],
+  "description": "Every update gets GitHub's auto-merge through platform-automerge and is merged once a code owner in .github/CODEOWNERS approves it and the pull request's checks pass: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures",
+  "extends": ["github>yuanying/renovate-config", "github>yuanying/renovate-config:platform-automerge"],
   "schedule": ["before 12pm on the first day of the month"],
   "postUpdateOptions": ["gomodTidy"],
   "enabledManagers": ["gomod", "dockerfile", "github-actions", "custom.regex"],
