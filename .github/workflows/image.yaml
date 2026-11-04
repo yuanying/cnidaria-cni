@@ -7,8 +7,8 @@ name: Image
 # before the tag exists. ci.yaml calls it with main once the checks pass on a push to
 # main, which keeps :main on the latest commit (ADR 0011).
 #
-# A pull request builds the image without pushing it, so that an update Renovate merges
-# by itself (a base image, the Go toolchain) is known to still build for both
+# A pull request builds the image without pushing it, so that a Renovate update merged
+# on its approval (a base image, the Go toolchain) is known to still build for both
 # architectures. Only the publishing job holds the package write permission. A called run
 # always publishes, even when the caller runs on a pull request (release.yaml on the
 # merge of a vuln-responder/ branch): the version input is what tells them apart.
