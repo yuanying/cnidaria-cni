@@ -1,9 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Every update gets GitHub's auto-merge through platform-automerge and is merged once a code owner in .github/CODEOWNERS approves it and the pull request's checks pass: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures",
+  "description": "Every update gets GitHub's auto-merge through platform-automerge and is merged once a code owner in .github/CODEOWNERS approves it and the pull request's checks pass: CI runs lint, the generate check, vet and the unit tests, and the image workflow builds the image for both architectures. gomodTidy runs go mod tidy after every Go update, and gomodUpdateImportPaths lets a major Go module update rewrite the import paths; without it Renovate skips go mod tidy on major updates and leaves go.mod untidy",
   "extends": ["github>yuanying/renovate-config", "github>yuanying/renovate-config:platform-automerge"],
   "schedule": ["before 12pm on the first day of the month"],
-  "postUpdateOptions": ["gomodTidy"],
+  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"],
   "enabledManagers": ["gomod", "dockerfile", "github-actions", "custom.regex"],
   "customManagers": [
     {
